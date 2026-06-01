@@ -6,3 +6,4 @@ __pycache__/
 .DS_Store
 monitor_log.txt
 .workbuddy/
+.gitignore: okx_data/ okx_history.zip
