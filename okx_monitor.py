@@ -189,7 +189,73 @@ def trend_dmi(candles, period=14):
     else:
         return "空", adx, last_atr
 
-# ── 评分 ──
+# ── 摆动点方向 (对比用) ──
+def trend_swing(candles):
+    """摆动高低点 + 1ATR容差 (原始算法，仅用于对比)"""
+    n = len(candles)
+    if n < 30:
+        return "N/A"
+    atr = calc_atr(candles)
+    if atr is None:
+        return "N/A"
+    swing_highs, swing_lows = [], []
+    for i in range(2, n - 2):
+        h, l = candles[i]["h"], candles[i]["l"]
+        if (h >= candles[i-1]["h"] and h >= candles[i-2]["h"] and
+            h >= candles[i+1]["h"] and h >= candles[i+2]["h"]):
+            swing_highs.append(h)
+        if (l <= candles[i-1]["l"] and l <= candles[i-2]["l"] and
+            l <= candles[i+1]["l"] and l <= candles[i+2]["l"]):
+            swing_lows.append(l)
+    if len(swing_highs) < 2 or len(swing_lows) < 2:
+        return "N/A"
+    h2, h1 = swing_highs[-2], swing_highs[-1]
+    l2, l1 = swing_lows[-2], swing_lows[-1]
+    highs_up = h1 > h2
+    lows_ok = l1 >= l2 - atr
+    if highs_up and lows_ok:
+        return "多"
+    elif not highs_up and not lows_ok:
+        return "空"
+    else:
+        return "多" if lows_ok else "空"
+
+# ── 多标准评分 ──
+DIR_SCORE = {"1H": 1, "4H": 1, "1D": 2}
+
+def calc_multi_score(trends_dmi, trends_sw, srsis, adxs):
+    """
+    返回三套评分:
+      dmi_pure: DMI方向 (纯整数)
+      dmi_adx:  DMI方向 × ADX权重
+      swing:    摆动点方向 (纯整数)
+    """
+    def score_one(trends, weight_fn=None):
+        bull, bear = 0, 0
+        for tf in ["1H", "4H", "1D"]:
+            d = trends[tf]
+            s = srsis[tf]
+            w = DIR_SCORE[tf]
+            if weight_fn:
+                adx = adxs[tf]
+                aw = 0.5 if (adx is not None and adx < 20) else (0.75 if (adx is not None and adx < 25) else 1.0)
+                w *= aw
+            if d == "多": bull += w
+            elif d == "空": bear += w
+            if s is not None:
+                if s < 20: bull += 2 if tf == "1D" else DIR_SCORE[tf]
+                elif s < 30 and tf == "1D": bull += 1
+                if s > 80: bear += 2 if tf == "1D" else DIR_SCORE[tf]
+                elif s > 70 and tf == "1D": bear += 1
+        return round(bull, 1), round(bear, 1)
+    
+    dmi_b, dmi_s = score_one(trends_dmi)
+    adx_b, adx_s = score_one(trends_dmi, weight_fn=True)
+    sw_b, sw_s = score_one(trends_sw)
+    
+    return (int(dmi_b), int(dmi_s)), (adx_b, adx_s), (int(sw_b), int(sw_s))
+
+# ── 评分 (默认用DMI纯整数) ──
 DIR_SCORE = {"1H": 1, "4H": 1, "1D": 2}
 
 def adx_weight(adx):
@@ -237,125 +303,77 @@ def send_report(results, now_str):
     return False
 
 def _send_pushplus(results, now_str):
-    """PushPlus推送到微信，HTML表格，直接从数据生成"""
+    """PushPlus推送到微信，HTML表格含多标准对比"""
     url = "http://www.pushplus.plus/send"
-    
     alert_count = sum(1 for r in results if r.get("bull",0) >= ALERT_THRESHOLD or r.get("bear",0) >= ALERT_THRESHOLD)
     
-    def dc(d):
-        if d == "多": return "#27ae60"
-        if d == "空": return "#e74c3c"
-        return "#999"
-    
+    dcol = {"多":"#27ae60","空":"#e74c3c","N/A":"#999"}
     def sc(v):
         try:
             n = float(v)
-            if n > 80: return "#e74c3c", "bold"
-            if n < 20: return "#27ae60", "bold"
+            if n > 80: return "#e74c3c","bold"
+            if n < 20: return "#27ae60","bold"
         except: pass
-        return "#333", "normal"
+        return "#333","normal"
+    def srf(v):
+        if v is None: return "N/A","#999","normal"
+        c,w = sc(v); return f"{v:.1f}",c,w
+
+    htm = f'<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:520px">'
+    htm += f'<h3 style="margin:0 0 6px;color:#333">📊 OKX 策略扫描</h3>'
+    htm += f'<p style="color:#999;font-size:12px;margin:0 0 10px">{now_str}</p>'
     
-    htm = f"""
-<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:520px">
-<h3 style="margin:0 0 6px;color:#333">📊 OKX 策略扫描</h3>
-<p style="color:#999;font-size:12px;margin:0 0 10px">{now_str}</p>
-"""
-    # 预警
-    alert_rows = [r for r in results if r.get("bull",0) >= ALERT_THRESHOLD or r.get("bear",0) >= ALERT_THRESHOLD]
-    if alert_rows:
+    alerts = [r for r in results if r.get("bull",0) >= ALERT_THRESHOLD or r.get("bear",0) >= ALERT_THRESHOLD]
+    if alerts:
         htm += '<p style="color:#e74c3c;font-weight:bold;margin:0 0 6px">⚠️ 高分预警（≥6分）</p>'
-        for r in alert_rows:
-            name = r["symbol"].replace("-SWAP","").replace("-USDT","")
-            if r.get("bull",0) >= ALERT_THRESHOLD:
-                htm += f'<p style="margin:2px 0;font-size:14px">🟢 <b>{name}</b> 多分={r["bull"]}</p>'
-            if r.get("bear",0) >= ALERT_THRESHOLD:
-                htm += f'<p style="margin:2px 0;font-size:14px">🔴 <b>{name}</b> 空分={r["bear"]}</p>'
+        for r in alerts:
+            nm = r["symbol"].replace("-SWAP","").replace("-USDT","")
+            if r.get("bull",0) >= ALERT_THRESHOLD: htm += f'<p style="margin:2px 0;font-size:14px">🟢 <b>{nm}</b> 多分={r["bull"]}</p>'
+            if r.get("bear",0) >= ALERT_THRESHOLD: htm += f'<p style="margin:2px 0;font-size:14px">🔴 <b>{nm}</b> 空分={r["bear"]}</p>'
         htm += '<hr style="border:0;border-top:1px solid #eee;margin:8px 0">'
     
-    # 表格
-    htm += """
-<table style="width:100%;border-collapse:collapse;font-size:12px">
-<tr style="background:#f5f6fa;font-weight:bold;color:#666">
-<td style="padding:5px 3px">币种</td>
-<td style="padding:5px 1px;text-align:center">1H</td>
-<td style="padding:5px 1px;text-align:center">4H</td>
-<td style="padding:5px 1px;text-align:center">1D</td>
-<td style="padding:5px 1px;text-align:center;color:#3498db">1H SRSI</td>
-<td style="padding:5px 1px;text-align:center;color:#3498db">4H SRSI</td>
-<td style="padding:5px 1px;text-align:center;color:#3498db">1D SRSI</td>
-<td style="padding:5px 2px;text-align:center;color:#27ae60">多</td>
-<td style="padding:5px 2px;text-align:center;color:#e74c3c">空</td>
-</tr>
-"""
+    htm += '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666"><td style="padding:5px 3px">币种</td><td style="padding:5px 1px;text-align:center">1H</td><td style="padding:5px 1px;text-align:center">4H</td><td style="padding:5px 1px;text-align:center">1D</td><td style="padding:5px 1px;text-align:center;color:#3498db">1H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">4H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">1D SRSI</td><td style="padding:5px 2px;text-align:center;color:#27ae60">多</td><td style="padding:5px 2px;text-align:center;color:#e74c3c">空</td></tr>'
     
-    for i, r in enumerate(results):
-        if "_error" in r:
-            continue
-        bg = "#fff" if i % 2 == 0 else "#fafbfc"
-        name = r["symbol"].replace("-SWAP","").replace("-USDT","")
-        t = r["trends"]
-        s = r["srsis"]
-        
-        bull = r["bull"]
-        bear = r["bear"]
-        alert = bull >= ALERT_THRESHOLD or bear >= ALERT_THRESHOLD
-        border = "border-left:3px solid #e74c3c;" if alert else ""
-        
-        bull_str = f"{bull}"
-        bear_str = f"{bear}"
-        bull_emoji = "🟢" if bull >= ALERT_THRESHOLD else ""
-        bear_emoji = "🔴" if bear >= ALERT_THRESHOLD else ""
-        
-        def srf(v):
-            if v is None: return "N/A", "#999", "normal"
-            c, w = sc(v)
-            return f"{v:.1f}", c, w
-        
-        s1h, c1h, w1h = srf(s["1H"])
-        s4h, c4h, w4h = srf(s["4H"])
-        s1d, c1d, w1d = srf(s["1D"])
-        
-        htm += f"""<tr style="background:{bg};{border}">
-<td style="padding:5px 3px;font-weight:bold">{name}</td>
-<td style="padding:5px 1px;text-align:center;color:{dc(t['1H'])};font-weight:bold;font-size:11px">{t['1H']}</td>
-<td style="padding:5px 1px;text-align:center;color:{dc(t['4H'])};font-weight:bold;font-size:11px">{t['4H']}</td>
-<td style="padding:5px 1px;text-align:center;color:{dc(t['1D'])};font-weight:bold;font-size:11px">{t['1D']}</td>
-<td style="padding:5px 1px;text-align:center;color:{c1h};font-weight:{w1h}">{s1h}</td>
-<td style="padding:5px 1px;text-align:center;color:{c4h};font-weight:{w4h}">{s4h}</td>
-<td style="padding:5px 1px;text-align:center;color:{c1d};font-weight:{w1d}">{s1d}</td>
-<td style="padding:5px 2px;text-align:center;font-weight:bold;color:#27ae60">{bull_emoji}{bull_str}</td>
-<td style="padding:5px 2px;text-align:center;font-weight:bold;color:#e74c3c">{bear_emoji}{bear_str}</td>
-</tr>
-"""
+    for i,r in enumerate(results):
+        if "_error" in r: continue
+        bg = "#fff" if i%2==0 else "#fafbfc"
+        nm = r["symbol"].replace("-SWAP","").replace("-USDT","")
+        t = r["trends"]; s = r["srsis"]
+        alert = r["bull"]>=ALERT_THRESHOLD or r["bear"]>=ALERT_THRESHOLD
+        bd = "border-left:3px solid #e74c3c;" if alert else ""
+        be_ = "🟢" if r["bull"]>=ALERT_THRESHOLD else ""
+        re_ = "🔴" if r["bear"]>=ALERT_THRESHOLD else ""
+        s1h,c1h,w1h=srf(s["1H"]); s4h,c4h,w4h=srf(s["4H"]); s1d,c1d,w1d=srf(s["1D"])
+        htm += f'<tr style="background:{bg};{bd}"><td style="padding:5px 3px;font-weight:bold">{nm}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1H"],"#999")};font-weight:bold;font-size:11px">{t["1H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["4H"],"#999")};font-weight:bold;font-size:11px">{t["4H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1D"],"#999")};font-weight:bold;font-size:11px">{t["1D"]}</td><td style="padding:5px 1px;text-align:center;color:{c1h};font-weight:{w1h}">{s1h}</td><td style="padding:5px 1px;text-align:center;color:{c4h};font-weight:{w4h}">{s4h}</td><td style="padding:5px 1px;text-align:center;color:{c1d};font-weight:{w1d}">{s1d}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td></tr>'
     
-    htm += f"""
-</table>
-<hr style="border:0;border-top:1px solid #eee;margin:8px 0">
-<p style="color:#999;font-size:10px;margin:1px 0">📐 DMI/ADX · ADX<20权重0.5 · ADX>25全权重 · ≥{ALERT_THRESHOLD}预警</p>
-<p style="color:#999;font-size:10px;margin:1px 0">⚡ SRSI>80空加分 <20多加 · 1D加权×2</p>
-<p style="color:#999;font-size:10px;margin:1px 0">🔔 下轮 {(datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=1)).strftime("%H:%M")} CST</p>
-</div>
-"""
+    htm += '</table>'
     
-    payload = {
-        "token": PUSHPLUS_TOKEN,
-        "title": f"OKX {alert_count}预警" if alert_count else "OKX 策略扫描",
-        "content": htm,
-        "template": "html"
-    }
+    # Comparison table
+    htm += '<div style="margin-top:10px"><p style="font-size:11px;font-weight:bold;color:#666;margin:0 0 4px">📊 多标准评分对比</p>'
+    htm += '<table style="width:100%;border-collapse:collapse;font-size:11px">'
+    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666"><td style="padding:4px 3px">币种</td><td style="padding:4px 2px;text-align:center">DMI纯分</td><td style="padding:4px 2px;text-align:center">ADX加权</td><td style="padding:4px 2px;text-align:center">摆动点</td></tr>'
+    for i,r in enumerate(results):
+        if "_error" in r: continue
+        bg = "#fff" if i%2==0 else "#fafbfc"
+        nm = r["symbol"].replace("-SWAP","").replace("-USDT","")
+        dmi = f"多{r['bull']}" if r['bull']>=r['bear'] else f"空{r['bear']}"
+        adx = f"多{r['bull_adx']:.1f}" if r['bull_adx']>=r['bear_adx'] else f"空{r['bear_adx']:.1f}"
+        sw = f"多{r['bull_sw']}" if r['bull_sw']>=r['bear_sw'] else f"空{r['bear_sw']}"
+        htm += f'<tr style="background:{bg}"><td style="padding:4px 3px;font-weight:bold">{nm}</td><td style="padding:4px 2px;text-align:center">{dmi}</td><td style="padding:4px 2px;text-align:center">{adx}</td><td style="padding:4px 2px;text-align:center">{sw}</td></tr>'
+    htm += '</table></div>'
     
+    htm += f'<hr style="border:0;border-top:1px solid #eee;margin:8px 0"><p style="color:#999;font-size:10px;margin:1px 0">📐 DMI/ADX | 对比三标准 | ≥{ALERT_THRESHOLD}预警</p><p style="color:#999;font-size:10px;margin:1px 0">⚡ SRSI>80空加分 <20多加 · 1D加权×2</p><p style="color:#999;font-size:10px;margin:1px 0">🔔 下轮 {(datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=1)).strftime("%H:%M")} CST</p></div>'
+    
+    payload = {"token": PUSHPLUS_TOKEN, "title": f"OKX {alert_count}预警" if alert_count else "OKX 策略扫描", "content": htm, "template": "html"}
     try:
         resp = requests.post(url, json=payload, timeout=10)
         r = resp.json()
         if r.get("code") == 200:
-            print(f"  ✅ PushPlus已推送 ({alert_count}个预警)")
-            return True
-        else:
-            print(f"  ❌ PushPlus推送失败: {r}")
-            return False
+            print(f"  ✅ PushPlus已推送 ({alert_count}个预警)"); return True
+        print(f"  ❌ PushPlus推送失败: {r}"); return False
     except Exception as e:
-        print(f"  ❌ PushPlus推送异常: {e}")
-        return False
+        print(f"  ❌ PushPlus推送异常: {e}"); return False
 
 def _send_wecom(results, now_str):
     """企微机器人推送（备用）"""
@@ -393,6 +411,7 @@ def _send_wecom(results, now_str):
 def scan_symbol(sym):
     row = {"symbol": sym}
     trends = {}
+    trends_sw = {}
     srsis = {}
     adxs = {}
     
@@ -400,25 +419,32 @@ def scan_symbol(sym):
         candles = fetch_ohlcv(sym, bar)
         if not candles or len(candles) < 20:
             trends[tf_label] = "N/A"
+            trends_sw[tf_label] = "N/A"
             srsis[tf_label] = None
             adxs[tf_label] = None
             continue
         
         closes = [c["c"] for c in candles]
         d, adx, atr = trend_dmi(candles)
+        sw = trend_swing(candles)
         sr = calc_stoch_rsi(closes)
         
         trends[tf_label] = d
+        trends_sw[tf_label] = sw
         srsis[tf_label] = round(sr, 1) if sr is not None else None
         adxs[tf_label] = round(adx, 1) if adx is not None else None
         time.sleep(0.15)
     
-    bull, bear = calc_score(trends, srsis, adxs)
+    (dmi_b, dmi_s), (adx_b, adx_s), (sw_b, sw_s) = calc_multi_score(trends, trends_sw, srsis, adxs)
     row["trends"] = trends
     row["srsis"] = srsis
     row["adxs"] = adxs
-    row["bull"] = bull
-    row["bear"] = bear
+    row["bull"] = dmi_b
+    row["bear"] = dmi_s
+    row["bull_adx"] = adx_b
+    row["bear_adx"] = adx_s
+    row["bull_sw"] = sw_b
+    row["bear_sw"] = sw_s
     
     return row
 
@@ -505,8 +531,20 @@ def main():
             output.append(fmt_line(r))
     
     output.append("")
+    output.append("─── 多标准评分对比 ───")
+    output.append(f"{'币种':<10} {'DMI纯分':>8} {'ADX加权':>8} {'摆动点':>8}")
+    output.append("-" * 38)
+    for r in results:
+        if "_error" in r: continue
+        name = r["symbol"].replace("-SWAP","").replace("-USDT","")
+        dmi_s = f"多{r['bull']}" if r['bull'] >= r['bear'] else f"空{r['bear']}"
+        adx_s = f"多{r['bull_adx']:.1f}" if r['bull_adx'] >= r['bear_adx'] else f"空{r['bear_adx']:.1f}"
+        sw_s = f"多{r['bull_sw']}" if r['bull_sw'] >= r['bear_sw'] else f"空{r['bear_sw']}"
+        output.append(f"{name:<10} {dmi_s:>8} {adx_s:>8} {sw_s:>8}")
+    
+    output.append("")
     output.append("算法: DMI/ADX方向判断 + StochRSI (K+D)/2 Wilder平滑")
-    output.append("评分: 方向分(1H=1 4H=1 1D=2) + SRSI极端值加分 | ≥6预警 纯整数计分")
+    output.append("评分: 方向分(1H=1 4H=1 1D=2) + SRSI极端值加分 | ≥6预警 | 对比三标准")
     
     text = "\n".join(output)
     print(text)
