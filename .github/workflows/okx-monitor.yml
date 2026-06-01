@@ -1,10 +1,10 @@
-name: OKX Strategy Monitor
+name: OKX Strategy Monitor (15min)
 
 on:
   push:
     branches: [main]
   schedule:
-    - cron: '0 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -26,3 +26,15 @@ jobs:
         run: python okx_monitor.py
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
+
+      - name: Get date for artifact
+        id: date
+        run: echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
+      - name: Upload scan CSV (daily cumulative)
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-data-${{ steps.date.outputs.date }}
+          path: okx_data/scans/
+          if-no-files-found: warn
+          overwrite: true

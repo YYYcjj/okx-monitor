@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-OKX 策略监控 v2.0
-- 方向: 摆动高低点 + 1×ATR 容差
+OKX 策略监控 v2.1
+- 方向: DMI/ADX (Wilder) + 摆动点+ATR (对比)
 - StochRSI: (K+D)/2, Wilder平滑
 - 评分: 方向分 1H=1, 4H=1, 1D=2 + SRSI极端值加分
-- 预警: 多/空分 ≥6 → Server酱推送到微信
+- 调度: 每15分钟扫描 → 日间(7-24)整点推送全量 / 夜间(0-7)仅高分预警
+- 文档: 所有扫描结果存入 okx_data/scans/YYYY-MM-DD.csv 供参数验证
 """
 import warnings
 warnings.filterwarnings("ignore")
@@ -13,6 +14,7 @@ import time
 import json
 import os
 import sys
+import csv
 from datetime import datetime, timezone, timedelta
 
 # ── 配置 ──
@@ -256,18 +258,16 @@ def calc_multi_score(trends_dmi, trends_sw, srsis, adxs):
     return (int(dmi_b), int(dmi_s)), (adx_b, adx_s), (int(sw_b), int(sw_s))
 
 # ── 评分 (默认用DMI纯整数) ──
-DIR_SCORE = {"1H": 1, "4H": 1, "1D": 2}
-
 def adx_weight(adx):
     """ADX趋势强度 → 方向分权重"""
     if adx is None:
         return 1.0
     if adx < 20:
-        return 0.5   # 弱趋势，方向分打5折
+        return 0.5
     elif adx < 25:
-        return 0.75  # 趋势形成中
+        return 0.75
     else:
-        return 1.0   # 强趋势
+        return 1.0
 
 def calc_score(trends, srsis, adx_values):
     bull, bear = 0, 0
@@ -293,17 +293,82 @@ def calc_score(trends, srsis, adx_values):
     
     return bull, bear
 
+# ── CSV 文档存储 ──
+def save_scan_csv(results, now):
+    """每次扫描结果追加到当日CSV，供参数验证"""
+    data_dir = os.path.join(SCRIPT_DIR, "okx_data", "scans")
+    os.makedirs(data_dir, exist_ok=True)
+    date_str = now.strftime("%Y-%m-%d")
+    csv_file = os.path.join(data_dir, f"{date_str}.csv")
+    ts = now.strftime("%Y-%m-%d %H:%M")
+    
+    file_exists = os.path.exists(csv_file)
+    with open(csv_file, 'a', newline='') as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow([
+                'timestamp', 'symbol',
+                'dmi_1h', 'dmi_4h', 'dmi_1d',
+                'sw_1h', 'sw_4h', 'sw_1d',
+                'adx_1h', 'adx_4h', 'adx_1d',
+                'srsi_1h', 'srsi_4h', 'srsi_1d',
+                'dmi_bull', 'dmi_bear', 'adx_bull', 'adx_bear', 'sw_bull', 'sw_bear'
+            ])
+        for r in results:
+            if "_error" in r:
+                continue
+            sw = r.get("trends_sw", {})
+            writer.writerow([
+                ts, r['symbol'],
+                r['trends'].get('1H', 'N/A'), r['trends'].get('4H', 'N/A'), r['trends'].get('1D', 'N/A'),
+                sw.get('1H', 'N/A'), sw.get('4H', 'N/A'), sw.get('1D', 'N/A'),
+                fmt_csv(r['adxs'].get('1H')), fmt_csv(r['adxs'].get('4H')), fmt_csv(r['adxs'].get('1D')),
+                fmt_csv(r['srsis'].get('1H')), fmt_csv(r['srsis'].get('4H')), fmt_csv(r['srsis'].get('1D')),
+                r['bull'], r['bear'], r['bull_adx'], r['bear_adx'], r['bull_sw'], r['bear_sw']
+            ])
+    print(f"  📄 CSV已记录 → {csv_file}")
+
+def fmt_csv(v):
+    if v is None:
+        return ''
+    return f"{v:.1f}" if isinstance(v, float) else str(v)
+
+# ── 时间判断 ──
+def should_push_full(now):
+    """日间(7:00-23:59)整点±5分钟 → 推送完整报表"""
+    h, m = now.hour, now.minute
+    return 7 <= h <= 23 and m <= 5
+
+def is_daytime(now):
+    """7:00-23:59 日间时段"""
+    return 7 <= now.hour <= 23
+
+def next_hour_cst():
+    """下一整点 CST 时间字符串"""
+    now = datetime.now(timezone(timedelta(hours=8)))
+    nh = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    return nh.strftime("%H:%M")
+
 # ── 通知推送 ──
+
 def send_report(results, now_str):
-    """优先 PushPlus，其次企微。直接用结构化数据"""
+    """推送完整HTML报表 (日间整点用)"""
     if PUSHPLUS_TOKEN:
-        return _send_pushplus(results, now_str)
+        return _send_pushplus_full(results, now_str)
     if WECOM_WEBHOOK:
         return _send_wecom(results, now_str)
     return False
 
-def _send_pushplus(results, now_str):
-    """PushPlus推送到微信，HTML表格含多标准对比"""
+def send_high_alert(alerts, now_str):
+    """推送高分预警简报 (任何时段高分触发)"""
+    if not PUSHPLUS_TOKEN:
+        if WECOM_WEBHOOK:
+            return _send_wecom_alert(alerts)
+        return False
+    return _send_pushplus_alert(alerts, now_str)
+
+def _send_pushplus_full(results, now_str):
+    """PushPlus 完整HTML报表"""
     url = "http://www.pushplus.plus/send"
     alert_count = sum(1 for r in results if r.get("bull",0) >= ALERT_THRESHOLD or r.get("bear",0) >= ALERT_THRESHOLD)
     
@@ -363,17 +428,40 @@ def _send_pushplus(results, now_str):
         htm += f'<tr style="background:{bg}"><td style="padding:4px 3px;font-weight:bold">{nm}</td><td style="padding:4px 2px;text-align:center">{dmi}</td><td style="padding:4px 2px;text-align:center">{adx}</td><td style="padding:4px 2px;text-align:center">{sw}</td></tr>'
     htm += '</table></div>'
     
-    htm += f'<hr style="border:0;border-top:1px solid #eee;margin:8px 0"><p style="color:#999;font-size:10px;margin:1px 0">📐 DMI/ADX | 对比三标准 | ≥{ALERT_THRESHOLD}预警</p><p style="color:#999;font-size:10px;margin:1px 0">⚡ SRSI>80空加分 <20多加 · 1D加权×2</p><p style="color:#999;font-size:10px;margin:1px 0">🔔 下轮 {(datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=1)).strftime("%H:%M")} CST</p></div>'
+    htm += f'<hr style="border:0;border-top:1px solid #eee;margin:8px 0"><p style="color:#999;font-size:10px;margin:1px 0">📐 DMI/ADX | 15min扫描 · 日间整点推送 | ≥{ALERT_THRESHOLD}预警</p><p style="color:#999;font-size:10px;margin:1px 0">⚡ SRSI>80空加分 <20多加 · 1D加权×2</p><p style="color:#999;font-size:10px;margin:1px 0">🔔 下轮 {(datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=1)).strftime("%H:%M")} CST</p></div>'
     
     payload = {"token": PUSHPLUS_TOKEN, "title": f"OKX {alert_count}预警" if alert_count else "OKX 策略扫描", "content": htm, "template": "html"}
     try:
         resp = requests.post(url, json=payload, timeout=10)
         r = resp.json()
         if r.get("code") == 200:
-            print(f"  ✅ PushPlus已推送 ({alert_count}个预警)"); return True
+            print(f"  ✅ PushPlus完整报表已推送 ({alert_count}个预警)"); return True
         print(f"  ❌ PushPlus推送失败: {r}"); return False
     except Exception as e:
         print(f"  ❌ PushPlus推送异常: {e}"); return False
+
+def _send_pushplus_alert(alerts, now_str):
+    """PushPlus 高分预警简报"""
+    url = "http://www.pushplus.plus/send"
+    htm = f'<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:400px">'
+    htm += f'<h3 style="color:#e74c3c;margin:0 0 6px">⚠️ OKX 高分预警</h3>'
+    htm += f'<p style="color:#999;font-size:11px;margin:0 0 8px">{now_str}</p>'
+    for a in alerts:
+        emoji = "🟢" if a["type"] == "多" else "🔴"
+        name = a["symbol"].replace("-SWAP", "").replace("-USDT", "")
+        htm += f'<p style="margin:4px 0;font-size:15px;font-weight:bold">{emoji} {name} {a["type"]}分={a["score"]}</p>'
+        htm += f'<p style="margin:1px 0;font-size:11px;color:#666">方向: {a.get("t_1h","")}/{a.get("t_4h","")}/{a.get("t_1d","")} | SRSI: {a.get("s_1h","")}/{a.get("s_4h","")}/{a.get("s_1d","")}</p>'
+    htm += f'<hr style="border:0;border-top:1px solid #eee;margin:6px 0"><p style="color:#999;font-size:10px;margin:0">📐 DMI/ADX | 15min扫描 | ≥{ALERT_THRESHOLD}预警 | 下轮 {next_hour_cst()} CST</p></div>'
+    
+    payload = {"token": PUSHPLUS_TOKEN, "title": f"⚠️ OKX {len(alerts)}个高分预警", "content": htm, "template": "html"}
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        r = resp.json()
+        if r.get("code") == 200:
+            print(f"  ✅ 高分预警已推送 ({len(alerts)}个)"); return True
+        print(f"  ❌ 高分预警推送失败: {r}"); return False
+    except Exception as e:
+        print(f"  ❌ 高分预警推送异常: {e}"); return False
 
 def _send_wecom(results, now_str):
     """企微机器人推送（备用）"""
@@ -407,6 +495,25 @@ def _send_wecom(results, now_str):
         print(f"  ❌ 企微通知异常: {e}")
         return False
 
+def _send_wecom_alert(alerts):
+    """企微高分预警（备用）"""
+    url = WECOM_WEBHOOK
+    lines = ["## ⚠️ OKX 高分预警", ""]
+    for a in alerts:
+        emoji = "🟢" if a["type"] == "多" else "🔴"
+        name = a["symbol"].replace("-SWAP", "").replace("-USDT", "")
+        lines.append(f"- {emoji} {name} {a['type']}分={a['score']}")
+    content = "\n".join(lines)
+    payload = {"msgtype": "markdown", "markdown": {"content": content}}
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        r = resp.json()
+        if r.get("errcode") == 0:
+            print(f"  ✅ 企微预警已发送"); return True
+        print(f"  ❌ 企微预警失败: {r}"); return False
+    except Exception as e:
+        print(f"  ❌ 企微预警异常: {e}"); return False
+
 # ── 单品种扫描 ──
 def scan_symbol(sym):
     row = {"symbol": sym}
@@ -437,6 +544,7 @@ def scan_symbol(sym):
     
     (dmi_b, dmi_s), (adx_b, adx_s), (sw_b, sw_s) = calc_multi_score(trends, trends_sw, srsis, adxs)
     row["trends"] = trends
+    row["trends_sw"] = trends_sw
     row["srsis"] = srsis
     row["adxs"] = adxs
     row["bull"] = dmi_b
@@ -472,8 +580,21 @@ def fmt_line(row):
 def main():
     now = datetime.now(timezone(timedelta(hours=8)))
     now_str = now.strftime("%Y-%m-%d %H:%M CST")
+    h, m = now.hour, now.minute
     
-    # 扫描
+    # 判断时段标签
+    if 7 <= h <= 23:
+        period_label = "日间"
+    else:
+        period_label = "夜间"
+    
+    is_full_push = should_push_full(now)
+    
+    print(f"\n{'='*60}")
+    print(f"[{now_str}] {period_label}扫描 | 整点推送={'是' if is_full_push else '否'}")
+    print(f"{'='*60}")
+    
+    # ── 扫描所有品种 ──
     results = []
     for sym in SYMBOLS:
         try:
@@ -482,83 +603,85 @@ def main():
         except Exception as e:
             name = sym.replace("-SWAP", "").replace("-USDT", "")
             results.append({
-                "symbol": sym, "trends": {"1H":"ERR","4H":"ERR","1D":"ERR"},
+                "symbol": sym,
+                "trends": {"1H":"ERR","4H":"ERR","1D":"ERR"},
+                "trends_sw": {"1H":"ERR","4H":"ERR","1D":"ERR"},
                 "srsis": {"1H":None,"4H":None,"1D":None},
-                "atrs": {"1H":None,"4H":None,"1D":None},
-                "bull": 0, "bear": 0, "_error": str(e)
+                "adxs": {"1H":None,"4H":None,"1D":None},
+                "bull": 0, "bear": 0,
+                "bull_adx": 0, "bear_adx": 0,
+                "bull_sw": 0, "bear_sw": 0,
+                "_error": str(e)
             })
     
-    # 高分预警
+    # ── 收集高分预警 ──
     alerts = []
     for r in results:
+        if r.get("_error"): continue
+        t = r["trends"]; s = r["srsis"]
         if r["bull"] >= ALERT_THRESHOLD:
             alerts.append({
                 "type": "多", "symbol": r["symbol"], "score": r["bull"],
-                "trends": r["trends"],
-                "srsi_1h": fmt_srsi(r["srsis"]["1H"]),
-                "srsi_4h": fmt_srsi(r["srsis"]["4H"]),
-                "srsi_1d": fmt_srsi(r["srsis"]["1D"]),
+                "t_1h": t["1H"], "t_4h": t["4H"], "t_1d": t["1D"],
+                "s_1h": fmt_srsi(s["1H"]), "s_4h": fmt_srsi(s["4H"]), "s_1d": fmt_srsi(s["1D"]),
             })
         if r["bear"] >= ALERT_THRESHOLD:
             alerts.append({
                 "type": "空", "symbol": r["symbol"], "score": r["bear"],
-                "trends": r["trends"],
-                "srsi_1h": fmt_srsi(r["srsis"]["1H"]),
-                "srsi_4h": fmt_srsi(r["srsis"]["4H"]),
-                "srsi_1d": fmt_srsi(r["srsis"]["1D"]),
+                "t_1h": t["1H"], "t_4h": t["4H"], "t_1d": t["1D"],
+                "s_1h": fmt_srsi(s["1H"]), "s_4h": fmt_srsi(s["4H"]), "s_1d": fmt_srsi(s["1D"]),
             })
     
-    # 构建输出
-    output = []
+    # ── 1. 始终保存CSV文档 ──
+    save_scan_csv(results, now)
+    
+    # ── 2. 控制台输出 ──
     if alerts:
-        output.append("⚠️ 高分预警（≥6分）：")
+        print(f"\n⚠️ 高分预警（≥{ALERT_THRESHOLD}分）：")
         for a in alerts:
             emoji = "🟢" if a["type"] == "多" else "🔴"
             name = a["symbol"].replace("-SWAP", "").replace("-USDT", "")
-            output.append(f"  {emoji} {name} {a['type']}分={a['score']}")
-        output.append("")
+            print(f"  {emoji} {name} {a['type']}分={a['score']}")
     
-    output.append(f"═══ OKX 策略扫描 {now_str} ═══")
-    output.append("")
-    output.append(f"{'币种':<10} {'1H':^4} {'4H':^4} {'1D':^4} {'1H SRSI':>7} {'4H SRSI':>7} {'1D SRSI':>7}   多分     空分")
-    output.append("-" * 76)
-    
+    print(f"\n{'币种':<10} {'1H':^4} {'4H':^4} {'1D':^4} {'1H SRSI':>7} {'4H SRSI':>7} {'1D SRSI':>7}   多分     空分")
+    print("-" * 76)
     for r in results:
         if "_error" in r:
             name = r["symbol"].replace("-SWAP", "").replace("-USDT", "")
-            output.append(f"{name:<10} 获取失败: {r['_error']}")
+            print(f"{name:<10} 获取失败: {r['_error']}")
         else:
-            output.append(fmt_line(r))
+            print(fmt_line(r))
     
-    output.append("")
-    output.append("─── 多标准评分对比 ───")
-    output.append(f"{'币种':<10} {'DMI纯分':>8} {'ADX加权':>8} {'摆动点':>8}")
-    output.append("-" * 38)
+    print(f"\n─── 多标准对比 ───")
+    print(f"{'币种':<10} {'DMI纯分':>8} {'ADX加权':>8} {'摆动点':>8}")
+    print("-" * 38)
     for r in results:
         if "_error" in r: continue
         name = r["symbol"].replace("-SWAP","").replace("-USDT","")
         dmi_s = f"多{r['bull']}" if r['bull'] >= r['bear'] else f"空{r['bear']}"
         adx_s = f"多{r['bull_adx']:.1f}" if r['bull_adx'] >= r['bear_adx'] else f"空{r['bear_adx']:.1f}"
         sw_s = f"多{r['bull_sw']}" if r['bull_sw'] >= r['bear_sw'] else f"空{r['bear_sw']}"
-        output.append(f"{name:<10} {dmi_s:>8} {adx_s:>8} {sw_s:>8}")
+        print(f"{name:<10} {dmi_s:>8} {adx_s:>8} {sw_s:>8}")
     
-    output.append("")
-    output.append("算法: DMI/ADX方向判断 + StochRSI (K+D)/2 Wilder平滑")
-    output.append("评分: 方向分(1H=1 4H=1 1D=2) + SRSI极端值加分 | ≥6预警 | 对比三标准")
+    # ── 3. 推送决策 ──
+    pushed = False
+    if is_full_push:
+        # 日间整点 → 推送完整报表
+        print(f"\n📤 日间整点，推送完整报表...")
+        pushed = send_report(results, now_str)
+    elif alerts:
+        # 任何时段有高分 → 推送预警简报
+        print(f"\n📤 高分预警，推送简报...")
+        pushed = send_high_alert(alerts, now_str)
+    else:
+        print(f"\n📄 仅记录CSV (夜间无高分)")
     
-    text = "\n".join(output)
-    print(text)
-    
-    # 写日志
+    # ── 4. 写日志 ──
     log_file = os.path.join(SCRIPT_DIR, "monitor_log.txt")
     timestamp = now.strftime("%Y-%m-%d %H:%M")
+    status = "FULL" if is_full_push else ("ALERT" if alerts else "CSV")
     with open(log_file, "a") as f:
-        f.write(f"\n\n{'='*60}\n")
-        f.write(f"[{timestamp}]\n")
-        f.write(text)
-    
-    # 推送完整报表
-    send_report(results, now_str)
+        f.write(f"\n[{timestamp}] {period_label} {status} pushed={pushed} alerts={len(alerts)}\n")
     
     return results, alerts
 
