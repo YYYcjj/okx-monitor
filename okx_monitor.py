@@ -122,68 +122,102 @@ def calc_atr(candles, period=14):
         atr = (atr * (period - 1) + tr[i]) / period
     return atr
 
-# ── 方向判断: 摆动高低点 + 1×ATR 容差 ──
-def trend_swing(candles):
+# ── 方向判断: DMI/ADX (Wilder's Directional Movement) ──
+def trend_dmi(candles, period=14):
     """
-    多: 新峰 > 旧峰 且 新谷 ≥ 旧谷 - 1×ATR
-    空: 新峰 < 旧峰 且 新谷 < 旧谷 - 1×ATR
-    中: 矛盾状态
+    DMI方向判断 + ADX趋势强度
+    +DI > -DI → 多, -DI > +DI → 空
+    ADX: <20弱趋势  20-25形成中  >25强趋势
+    返回: (方向, ADX值, ATR值)
     """
     n = len(candles)
-    if n < 30:
-        return "N/A", None
+    if n < period + 1:
+        return "N/A", None, None
     
-    atr = calc_atr(candles)
-    if atr is None:
-        return "N/A", None
+    highs = [c["h"] for c in candles]
+    lows = [c["l"] for c in candles]
+    closes = [c["c"] for c in candles]
     
-    # 找摆动点 (前后各2根确认)
-    swing_highs = []
-    swing_lows = []
-    for i in range(2, n - 2):
-        h = candles[i]["h"]
-        l = candles[i]["l"]
-        if (h >= candles[i-1]["h"] and h >= candles[i-2]["h"] and
-            h >= candles[i+1]["h"] and h >= candles[i+2]["h"]):
-            swing_highs.append(h)
-        if (l <= candles[i-1]["l"] and l <= candles[i-2]["l"] and
-            l <= candles[i+1]["l"] and l <= candles[i+2]["l"]):
-            swing_lows.append(l)
+    # True Range
+    tr = [0.0] * n
+    for i in range(1, n):
+        h, l, pc = highs[i], lows[i], closes[i-1]
+        tr[i] = max(h - l, abs(h - pc), abs(l - pc))
     
-    if len(swing_highs) < 2 or len(swing_lows) < 2:
-        return "N/A", atr
+    # Directional Movement
+    plus_dm = [0.0] * n
+    minus_dm = [0.0] * n
+    for i in range(1, n):
+        up = highs[i] - highs[i-1]
+        down = lows[i-1] - lows[i]
+        if up > down and up > 0:
+            plus_dm[i] = up
+        if down > up and down > 0:
+            minus_dm[i] = down
     
-    h2, h1 = swing_highs[-2], swing_highs[-1]
-    l2, l1 = swing_lows[-2], swing_lows[-1]
+    # Wilder's smoothing
+    atr_smooth = sum(tr[1:period+1]) / period
+    spdm = sum(plus_dm[1:period+1]) / period
+    smdm = sum(minus_dm[1:period+1]) / period
     
-    highs_up = h1 > h2
-    lows_ok = l1 >= l2 - atr  # 1ATR容差
+    dx_vals = []
+    for i in range(period+1, n):
+        atr_smooth = (atr_smooth * (period - 1) + tr[i]) / period
+        spdm = (spdm * (period - 1) + plus_dm[i]) / period
+        smdm = (smdm * (period - 1) + minus_dm[i]) / period
+        
+        pdi = spdm / atr_smooth * 100 if atr_smooth > 0 else 0
+        mdi = smdm / atr_smooth * 100 if atr_smooth > 0 else 0
+        s = pdi + mdi
+        dx_vals.append(abs(pdi - mdi) / s * 100 if s > 0 else 0)
     
-    if highs_up and lows_ok:
-        return "多", atr
-    elif not highs_up and not lows_ok:
-        return "空", atr
+    if len(dx_vals) < period:
+        return "N/A", None, atr_smooth
+    
+    # ADX = Wilder smoothing of DX
+    adx = sum(dx_vals[:period]) / period
+    for i in range(period, len(dx_vals)):
+        adx = (adx * (period - 1) + dx_vals[i]) / period
+    
+    # Final +DI/-DI from last bar
+    last_atr = atr_smooth
+    last_pdi = spdm / last_atr * 100 if last_atr > 0 else 0
+    last_mdi = smdm / last_atr * 100 if last_atr > 0 else 0
+    
+    if last_pdi > last_mdi:
+        return "多", adx, last_atr
     else:
-        # 矛盾: 以谷为准
-        return "多" if lows_ok else "空", atr
+        return "空", adx, last_atr
 
 # ── 评分 ──
 DIR_SCORE = {"1H": 1, "4H": 1, "1D": 2}
 
-def calc_score(trends, srsis):
+def adx_weight(adx):
+    """ADX趋势强度 → 方向分权重"""
+    if adx is None:
+        return 1.0
+    if adx < 20:
+        return 0.5   # 弱趋势，方向分打5折
+    elif adx < 25:
+        return 0.75  # 趋势形成中
+    else:
+        return 1.0   # 强趋势
+
+def calc_score(trends, srsis, adx_values):
     bull, bear = 0, 0
     for tf in ["1H", "4H", "1D"]:
         d = trends[tf]
         s = srsis[tf]
+        adx = adx_values[tf]
         w = DIR_SCORE[tf]
+        aw = adx_weight(adx)  # ADX权重系数
         
         if d == "多":
-            bull += w
+            bull += w * aw
         elif d == "空":
-            bear += w
+            bear += w * aw
         
         if s is not None:
-            # SRSI加分，跟方向无关
             if s < 20:
                 bull += 2 if tf == "1D" else w
             elif s < 30 and tf == "1D":
@@ -193,7 +227,7 @@ def calc_score(trends, srsis):
             elif s > 70 and tf == "1D":
                 bear += 1
     
-    return bull, bear
+    return round(bull, 1), round(bear, 1)
 
 # ── 通知推送 ──
 def send_report(full_text, now_str):
@@ -284,29 +318,29 @@ def scan_symbol(sym):
     row = {"symbol": sym}
     trends = {}
     srsis = {}
-    atrs = {}
+    adxs = {}
     
     for tf_label, bar in [("1H", "1H"), ("4H", "4H"), ("1D", "1D")]:
         candles = fetch_ohlcv(sym, bar)
         if not candles or len(candles) < 20:
             trends[tf_label] = "N/A"
             srsis[tf_label] = None
-            atrs[tf_label] = None
+            adxs[tf_label] = None
             continue
         
         closes = [c["c"] for c in candles]
-        d, atr = trend_swing(candles)
+        d, adx, atr = trend_dmi(candles)
         sr = calc_stoch_rsi(closes)
         
         trends[tf_label] = d
         srsis[tf_label] = round(sr, 1) if sr is not None else None
-        atrs[tf_label] = atr
+        adxs[tf_label] = round(adx, 1) if adx is not None else None
         time.sleep(0.15)
     
-    bull, bear = calc_score(trends, srsis)
+    bull, bear = calc_score(trends, srsis, adxs)
     row["trends"] = trends
     row["srsis"] = srsis
-    row["atrs"] = atrs
+    row["adxs"] = adxs
     row["bull"] = bull
     row["bear"] = bear
     
@@ -320,14 +354,17 @@ def fmt_line(row):
     name = row["symbol"].replace("-SWAP", "").replace("-USDT", "")
     t = row["trends"]
     s = row["srsis"]
+    adxs = row.get("adxs", {})
     bull, bear = row["bull"], row["bear"]
     
     b_flag = "🟢" if bull >= ALERT_THRESHOLD else "  "
     r_flag = "🔴" if bear >= ALERT_THRESHOLD else "  "
     
+    adx_1h = f"{adxs['1H']:.0f}" if adxs['1H'] is not None else "N/A"
+    
     return (f"{name:<10} {t['1H']:^4} {t['4H']:^4} {t['1D']:^4} "
-            f"{fmt_srsi(s['1H']):>8} {fmt_srsi(s['4H']):>8} {fmt_srsi(s['1D']):>8}  "
-            f"{b_flag}{bull:<7} {r_flag}{bear}")
+            f"{fmt_srsi(s['1H']):>7} {fmt_srsi(s['4H']):>7} {fmt_srsi(s['1D']):>7}  "
+            f"{b_flag}{bull:<6.1f} {r_flag}{bear:<5.1f}")
 
 # ── 主函数 ──
 def main():
@@ -381,8 +418,8 @@ def main():
     
     output.append(f"═══ OKX 策略扫描 {now_str} ═══")
     output.append("")
-    output.append(f"{'币种':<10} {'1H':^4} {'4H':^4} {'1D':^4} {'1H SRSI':>8} {'4H SRSI':>8} {'1D SRSI':>8}   多分      空分")
-    output.append("-" * 78)
+    output.append(f"{'币种':<10} {'1H':^4} {'4H':^4} {'1D':^4} {'1H SRSI':>7} {'4H SRSI':>7} {'1D SRSI':>7}   多分     空分")
+    output.append("-" * 76)
     
     for r in results:
         if "_error" in r:
@@ -392,8 +429,8 @@ def main():
             output.append(fmt_line(r))
     
     output.append("")
-    output.append("算法: 摆动高低点+1ATR容差 | StochRSI (K+D)/2 Wilder平滑")
-    output.append("评分: 方向分(1H=1 4H=1 1D=2) + SRSI极端值加分 | ≥6预警")
+    output.append("算法: DMI/ADX方向判断 + StochRSI (K+D)/2 Wilder平滑")
+    output.append("评分: 方向分(1H=1 4H=1 1D=2)×ADX权重 + SRSI极端值加分 | ≥6预警")
     
     text = "\n".join(output)
     print(text)
