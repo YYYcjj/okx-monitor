@@ -196,36 +196,49 @@ def calc_score(trends, srsis):
     return bull, bear
 
 # ── 通知推送 ──
-def send_alert(alerts, scan_summary):
-    """优先 PushPlus，其次企微"""
+def send_report(full_text, now_str):
+    """优先 PushPlus，其次企微。每次都推送完整报表"""
     if PUSHPLUS_TOKEN:
-        return _send_pushplus(alerts)
+        return _send_pushplus(full_text, now_str)
     if WECOM_WEBHOOK:
-        return _send_wecom(alerts, scan_summary)
-    
-    print("  ⚠️ 未配置通知渠道，仅输出日志")
-    print("  PushPlus: https://www.pushplus.plus/ → 微信扫码获取Token → echo '你的token' > .pushplus_token")
+        return _send_wecom(full_text, now_str)
     return False
 
-def _send_pushplus(alerts):
+def _send_pushplus(full_text, now_str):
     """PushPlus推送到微信，免费200条/天"""
     url = "http://www.pushplus.plus/send"
-    now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M CST")
     
-    lines = [f"## ⚠️ OKX 策略预警 {now}", ""]
-    for a in alerts:
-        emoji = "🟢" if a["type"] == "多" else "🔴"
-        name = a["symbol"].replace("-SWAP", "").replace("-USDT", "")
-        lines.append(
-            f"- {emoji} **{name}** {a['type']}分={a['score']}  "
-            f"| 方向 1H:{a['trends']['1H']} 4H:{a['trends']['4H']} 1D:{a['trends']['1D']}  "
-            f"| SRSI {a['srsi_1h']}/{a['srsi_4h']}/{a['srsi_1d']}"
-        )
+    # 提取预警摘要做标题
+    lines = full_text.split("\n")
+    alert_count = sum(1 for l in lines if l.strip().startswith("🟢") or l.strip().startswith("🔴"))
+    
+    # markdown 格式的全量推文
+    content = f"## OKX 策略扫描 {now_str}\n\n"
+    
+    # 预警部分
+    alert_lines = [l for l in lines if "分=" in l and ("🟢" in l or "🔴" in l)]
+    if alert_lines:
+        content += "**⚠️ 高分预警：**\n"
+        for l in alert_lines:
+            content += f"- {l.strip()}\n"
+        content += "\n"
+    
+    # 表格
+    content += "```\n"
+    in_table = False
+    for l in lines:
+        if "═══" in l or "算法:" in l or "评分:" in l:
+            continue
+        if "1H" in l and "4H" in l and "SRSI" in l:
+            in_table = True
+        if in_table:
+            content += l + "\n"
+    content += "```\n\n> 评分: 方向分(1H=1 4H=1 1D=2) + SRSI极端值加分 | ≥6预警"
     
     payload = {
         "token": PUSHPLUS_TOKEN,
-        "title": f"OKX预警 {len(alerts)}条",
-        "content": "\n".join(lines),
+        "title": f"OKX {alert_count}预警" if alert_count else "OKX 策略扫描",
+        "content": content,
         "template": "markdown"
     }
     
@@ -233,7 +246,7 @@ def _send_pushplus(alerts):
         resp = requests.post(url, json=payload, timeout=10)
         r = resp.json()
         if r.get("code") == 200:
-            print(f"  ✅ PushPlus已推送 ({len(alerts)}个预警)")
+            print(f"  ✅ PushPlus已推送 ({alert_count}个预警)")
             return True
         else:
             print(f"  ❌ PushPlus推送失败: {r}")
@@ -242,36 +255,22 @@ def _send_pushplus(alerts):
         print(f"  ❌ PushPlus推送异常: {e}")
         return False
 
-def _send_wecom(alerts, scan_summary):
+def _send_wecom(full_text, now_str):
     """企微机器人推送（备用）"""
     url = WECOM_WEBHOOK
-    now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M CST")
-    
-    lines = [
-        f"## ⚠️ OKX 策略预警 <font color=\"comment\">{now}</font>",
-        "",
-    ]
-    for a in alerts:
-        emoji = "🟢" if a["type"] == "多" else "🔴"
-        name = a["symbol"].replace("-SWAP", "").replace("-USDT", "")
-        lines.append(
-            f"> {emoji} **{name}** {a['type']}分={a['score']}  "
-            f"| 1H:{a['trends']['1H']} 4H:{a['trends']['4H']} 1D:{a['trends']['1D']}  "
-            f"| {a['srsi_1h']}/{a['srsi_4h']}/{a['srsi_1d']}"
-        )
-    
-    lines.extend(["", scan_summary])
+    content = full_text.replace("\n", "\n> ")
+    content = f"## OKX 策略扫描 {now_str}\n> {content}"
     
     payload = {
         "msgtype": "markdown",
-        "markdown": {"content": "\n".join(lines)}
+        "markdown": {"content": content}
     }
     
     try:
         resp = requests.post(url, json=payload, timeout=10)
         r = resp.json()
         if r.get("errcode") == 0:
-            print(f"  ✅ 企微通知已发送 ({len(alerts)}个预警)")
+            print(f"  ✅ 企微通知已发送")
             return True
         else:
             print(f"  ❌ 企微通知失败: {r}")
@@ -407,9 +406,8 @@ def main():
         f.write(f"[{timestamp}]\n")
         f.write(text)
     
-    # 推送预警
-    if alerts:
-        send_alert(alerts, f"> 完整报告见日志 | 下次扫描: {(now + timedelta(hours=1)).strftime('%H:%M')} CST")
+    # 推送完整报表
+    send_report(text, now_str)
     
     return results, alerts
 
