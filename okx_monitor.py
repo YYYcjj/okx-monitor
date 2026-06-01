@@ -208,14 +208,12 @@ def calc_score(trends, srsis, adx_values):
     for tf in ["1H", "4H", "1D"]:
         d = trends[tf]
         s = srsis[tf]
-        adx = adx_values[tf]
         w = DIR_SCORE[tf]
-        aw = adx_weight(adx)  # ADX权重系数
         
         if d == "多":
-            bull += w * aw
+            bull += w
         elif d == "空":
-            bear += w * aw
+            bear += w
         
         if s is not None:
             if s < 20:
@@ -227,7 +225,7 @@ def calc_score(trends, srsis, adx_values):
             elif s > 70 and tf == "1D":
                 bear += 1
     
-    return round(bull, 1), round(bear, 1)
+    return bull, bear
 
 # ── 通知推送 ──
 def send_report(results, now_str):
@@ -269,9 +267,9 @@ def _send_pushplus(results, now_str):
         for r in alert_rows:
             name = r["symbol"].replace("-SWAP","").replace("-USDT","")
             if r.get("bull",0) >= ALERT_THRESHOLD:
-                htm += f'<p style="margin:2px 0;font-size:14px">🟢 <b>{name}</b> 多分={r["bull"]:.1f}</p>'
+                htm += f'<p style="margin:2px 0;font-size:14px">🟢 <b>{name}</b> 多分={r["bull"]}</p>'
             if r.get("bear",0) >= ALERT_THRESHOLD:
-                htm += f'<p style="margin:2px 0;font-size:14px">🔴 <b>{name}</b> 空分={r["bear"]:.1f}</p>'
+                htm += f'<p style="margin:2px 0;font-size:14px">🔴 <b>{name}</b> 空分={r["bear"]}</p>'
         htm += '<hr style="border:0;border-top:1px solid #eee;margin:8px 0">'
     
     # 表格
@@ -303,8 +301,8 @@ def _send_pushplus(results, now_str):
         alert = bull >= ALERT_THRESHOLD or bear >= ALERT_THRESHOLD
         border = "border-left:3px solid #e74c3c;" if alert else ""
         
-        bull_str = f"{bull:.1f}"
-        bear_str = f"{bear:.1f}"
+        bull_str = f"{bull}"
+        bear_str = f"{bear}"
         bull_emoji = "🟢" if bull >= ALERT_THRESHOLD else ""
         bear_emoji = "🔴" if bear >= ALERT_THRESHOLD else ""
         
@@ -370,7 +368,7 @@ def _send_wecom(results, now_str):
         s = r["srsis"]
         bull = r["bull"]
         bear = r["bear"]
-        lines.append(f"- {name} {t['1H']}/{t['4H']}/{t['1D']} SRSI:{s['1H']}/{s['4H']}/{s['1D']} 多{bull:.1f}空{bear:.1f}")
+        lines.append(f"- {name} {t['1H']}/{t['4H']}/{t['1D']} SRSI:{s['1H']}/{s['4H']}/{s['1D']} 多{bull}空{bear}")
     content = "\n".join(lines)
     
     payload = {
@@ -442,7 +440,7 @@ def fmt_line(row):
     
     return (f"{name:<10} {t['1H']:^4} {t['4H']:^4} {t['1D']:^4} "
             f"{fmt_srsi(s['1H']):>7} {fmt_srsi(s['4H']):>7} {fmt_srsi(s['1D']):>7}  "
-            f"{b_flag}{bull:<6.1f} {r_flag}{bear:<5.1f}")
+            f"{b_flag}{bull:<3}   {r_flag}{bear}")
 
 # ── 主函数 ──
 def main():
@@ -508,7 +506,7 @@ def main():
     
     output.append("")
     output.append("算法: DMI/ADX方向判断 + StochRSI (K+D)/2 Wilder平滑")
-    output.append("评分: 方向分(1H=1 4H=1 1D=2)×ADX权重 + SRSI极端值加分 | ≥6预警")
+    output.append("评分: 方向分(1H=1 4H=1 1D=2) + SRSI极端值加分 | ≥6预警 纯整数计分")
     
     text = "\n".join(output)
     print(text)
