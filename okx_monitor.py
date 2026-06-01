@@ -242,38 +242,109 @@ def _send_pushplus(full_text, now_str):
     """PushPlus推送到微信，免费200条/天"""
     url = "http://www.pushplus.plus/send"
     
-    # 提取预警摘要做标题
     lines = full_text.split("\n")
-    alert_count = sum(1 for l in lines if l.strip().startswith("🟢") or l.strip().startswith("🔴"))
+    alert_count = sum(1 for l in lines if "🟢" in l.split("  ")[0] + l if "🟢" in l or "🔴" in l)
     
-    # markdown 格式的全量推文
-    content = f"## OKX 策略扫描 {now_str}\n\n"
-    
-    # 预警部分
-    alert_lines = [l for l in lines if "分=" in l and ("🟢" in l or "🔴" in l)]
-    if alert_lines:
-        content += "**⚠️ 高分预警：**\n"
-        for l in alert_lines:
-            content += f"- {l.strip()}\n"
-        content += "\n"
-    
-    # 表格
-    content += "```\n"
+    # 解析数据行
+    data_rows = []
     in_table = False
     for l in lines:
-        if "═══" in l or "算法:" in l or "评分:" in l:
-            continue
+        l = l.strip()
         if "1H" in l and "4H" in l and "SRSI" in l:
             in_table = True
-        if in_table:
-            content += l + "\n"
-    content += "```\n\n> 评分: 方向分(1H=1 4H=1 1D=2) + SRSI极端值加分 | ≥6预警"
+            continue
+        if in_table and l and not l.startswith("-") and not l.startswith("算法") and not l.startswith("评分"):
+            parts = l.split()
+            if len(parts) >= 9:
+                name = parts[0]
+                dir_1h, dir_4h, dir_1d = parts[1], parts[2], parts[3]
+                sr_1h, sr_4h, sr_1d = parts[4], parts[5], parts[6]
+                bull = parts[-3] if len(parts) > 8 else ""
+                bear = parts[-1] if len(parts) > 8 else ""
+                data_rows.append((name, dir_1h, dir_4h, dir_1d, sr_1h, sr_4h, sr_1d, bull, bear))
+    
+    # 构建 HTML
+    htm = f"""
+<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:500px">
+<h3 style="margin:0 0 8px;color:#333">📊 OKX 策略扫描</h3>
+<p style="color:#999;font-size:12px;margin:0 0 12px">{now_str}</p>
+"""
+    # 预警
+    alert_rows = [r for r in data_rows if ("🟢" in r[7] or "🔴" in r[8])]
+    if alert_rows:
+        htm += '<p style="color:#e74c3c;font-weight:bold;margin:0 0 8px">⚠️ 高分预警（≥6分）</p>'
+        for r in alert_rows:
+            emoji = "🟢" if "🟢" in r[7] else "🔴"
+            htm += f'<p style="margin:2px 0;font-size:14px">{emoji} <b>{r[0]}</b> 多{r[7].replace("🟢","")} 空{r[8].replace("🔴","")}</p>'
+        htm += '<hr style="border:0;border-top:1px solid #eee;margin:10px 0">'
+    
+    # 表格
+    htm += """
+<table style="width:100%;border-collapse:collapse;font-size:13px">
+<tr style="background:#f5f6fa;font-weight:bold;color:#666">
+<td style="padding:6px 4px">币种</td>
+<td style="padding:6px 2px;text-align:center">1H</td>
+<td style="padding:6px 2px;text-align:center">4H</td>
+<td style="padding:6px 2px;text-align:center">1D</td>
+<td style="padding:6px 2px;text-align:center;color:#3498db">1H SRSI</td>
+<td style="padding:6px 2px;text-align:center;color:#3498db">4H SRSI</td>
+<td style="padding:6px 2px;text-align:center;color:#3498db">1D SRSI</td>
+<td style="padding:6px 2px;text-align:center;color:#27ae60">多</td>
+<td style="padding:6px 2px;text-align:center;color:#e74c3c">空</td>
+</tr>
+"""
+    
+    for i, r in enumerate(data_rows):
+        bg = "#fff" if i % 2 == 0 else "#fafbfc"
+        alert_row = ("🟢" in r[7] or "🔴" in r[8])
+        border = "border-left:3px solid #e74c3c;" if alert_row else ""
+        
+        # 方向颜色
+        def dir_color(d):
+            if d == "多": return "color:#27ae60;font-weight:bold"
+            if d == "空": return "color:#e74c3c;font-weight:bold"
+            return "color:#999"
+        
+        # SRSI 颜色
+        def sr_color(v):
+            try:
+                n = float(v)
+                if n > 80: return "color:#e74c3c;font-weight:bold"
+                if n < 20: return "color:#27ae60;font-weight:bold"
+            except: pass
+            return "color:#333"
+        
+        # 清理分数
+        bull_val = r[7].replace("🟢", "").strip()
+        bear_val = r[8].replace("🔴", "").strip()
+        
+        htm += f"""<tr style="background:{bg};{border}">
+<td style="padding:6px 4px;font-weight:bold">{r[0]}</td>
+<td style="padding:6px 2px;text-align:center;{dir_color(r[1])}">{r[1]}</td>
+<td style="padding:6px 2px;text-align:center;{dir_color(r[2])}">{r[2]}</td>
+<td style="padding:6px 2px;text-align:center;{dir_color(r[3])}">{r[3]}</td>
+<td style="padding:6px 2px;text-align:center;{sr_color(r[4])}">{r[4]}</td>
+<td style="padding:6px 2px;text-align:center;{sr_color(r[5])}">{r[5]}</td>
+<td style="padding:6px 2px;text-align:center;{sr_color(r[6])}">{r[6]}</td>
+<td style="padding:6px 2px;text-align:center;font-weight:bold;color:#27ae60">{bull_val}</td>
+<td style="padding:6px 2px;text-align:center;font-weight:bold;color:#e74c3c">{bear_val}</td>
+</tr>
+"""
+    
+    htm += """
+</table>
+<hr style="border:0;border-top:1px solid #eee;margin:10px 0">
+<p style="color:#999;font-size:11px;margin:2px 0">📐 DMI/ADX方向 · ADX<20权重0.5 · ADX>25全权重</p>
+<p style="color:#999;font-size:11px;margin:2px 0">⚡ SRSI>80空加分 <20多加 · 1D加权×2</p>
+<p style="color:#999;font-size:11px;margin:2px 0">🔔 下轮 {(datetime.now(timezone(timedelta(hours=8))) + timedelta(hours=1)).strftime("%H:%M")} CST</p>
+</div>
+"""
     
     payload = {
         "token": PUSHPLUS_TOKEN,
         "title": f"OKX {alert_count}预警" if alert_count else "OKX 策略扫描",
-        "content": content,
-        "template": "markdown"
+        "content": htm,
+        "template": "html"
     }
     
     try:
