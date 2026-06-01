@@ -1,0 +1,8 @@
+.pushplus_token
+.wecom_webhook
+.serverchan_key
+memo*
+__pycache__/
+*.pyc
+.DS_Store
+monitor_log.txt
