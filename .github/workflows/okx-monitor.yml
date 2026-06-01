@@ -1,10 +1,11 @@
 name: OKX Strategy Monitor
 
 on:
+  push:
+    branches: [main]
   schedule:
-    # 每小时整点执行 (UTC，北京时间对应 XX:00)
     - cron: '0 * * * *'
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   scan:
@@ -22,6 +23,6 @@ jobs:
         run: pip install requests --quiet
 
       - name: Run monitor
-        env:
-          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: python okx_monitor.py
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
