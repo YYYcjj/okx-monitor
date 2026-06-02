@@ -22,6 +22,12 @@ jobs:
       - name: Install deps
         run: pip install requests --quiet
 
+      - name: Debug module imports
+        run: |
+          echo "=== Files ===" && ls -la shared/ monitor/
+          echo "=== Test import ===" && python -c "from shared.indicators import calc_rsi; print('shared OK')"
+          echo "=== Test monitor ===" && python -c "from monitor.okx_monitor import main; print('monitor OK')"
+
       - name: Get date
         id: date
         run: echo "date=$(TZ=Asia/Shanghai date +%Y-%m-%d)" >> $GITHUB_OUTPUT
