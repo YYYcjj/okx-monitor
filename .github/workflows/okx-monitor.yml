@@ -34,9 +34,8 @@ jobs:
         continue-on-error: true
 
       - name: Run monitor (appends to CSV)
-        run: python monitor/okx_monitor.py
+        run: python -m monitor.okx_monitor
         env:
-          PYTHONPATH: ${{ github.workspace }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
 
       - name: Upload cumulative CSV
