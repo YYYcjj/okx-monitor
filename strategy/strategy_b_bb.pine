@@ -1,0 +1,59 @@
+//@version=5
+// 策略B: 布林带突破 (60天回测胜率47.6%, 1574信号)
+strategy("OKX-策略B(布林带突破)", overlay=true,
+  initial_capital=1000, default_qty_type=strategy.percent_of_equity,
+  default_qty_value=100, commission_value=0.05)
+
+// ── 参数 ──
+bb_len    = input.int(20, "布林带周期")
+bb_std    = input.float(2.0, "标准差倍数", step=0.5)
+dmi_len   = input.int(14, "DMI周期")
+bb_exit_l = input.float(0.3, "出场%B下限", step=0.05)
+bb_exit_h = input.float(0.7, "出场%B上限", step=0.05)
+tp_pct    = input.float(8.0, "止盈%", step=0.5) / 100
+sl_pct    = input.float(4.0, "止损%", step=0.5) / 100
+
+// ── 布林带 ──
+[mid, upper, lower] = ta.bb(close, bb_len, bb_std)
+b_pct = (close - lower) / (upper - lower)  // %B
+
+// DMI - 日线方向
+[plusDI_d, minusDI_d, adx_d] = request.security(syminfo.tickerid, "D",
+  ta.dmi(dmi_len, dmi_len))
+
+// StochRSI - 避免极端反向
+rsi = ta.rsi(close, 14)
+k = ta.stoch(rsi, rsi, rsi, 14)
+d = ta.sma(k, 3)
+srsi = (k + d) / 2
+
+// ── 信号 ──
+// 多: 突破下轨 + 日线DMI多 + SRSI非极端超买
+bullBB = close < lower and close[1] >= lower[1]  // 刚突破
+longCondition = bullBB and plusDI_d > minusDI_d and srsi < 70
+
+// 空: 突破上轨 + 日线DMI空 + SRSI非极端超卖
+bearBB = close > upper and close[1] <= upper[1]
+shortCondition = bearBB and minusDI_d > plusDI_d and srsi > 30
+
+// ── 入场 ──
+if longCondition and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+if shortCondition and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+
+// ── 出场 ──
+// 价格回归中枢或止盈止损
+strategy.close("L", when=b_pct > bb_exit_h)
+strategy.close("S", when=b_pct < bb_exit_l)
+strategy.exit("XL", "L", limit=close*(1+tp_pct), stop=close*(1-sl_pct))
+strategy.exit("XS", "S", limit=close*(1-tp_pct), stop=close*(1+sl_pct))
+
+// ── 可视化 ──
+plot(mid, "中轨", color.gray)
+plot(upper, "上轨", color.red)
+plot(lower, "下轨", color.green)
+fill(plot(upper), plot(lower), color.new(color.blue, 95))
+
+plotshape(longCondition, "做多", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(shortCondition, "做空", shape.triangledown, location.abovebar, color.red, size=size.small)

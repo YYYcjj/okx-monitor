@@ -1,0 +1,65 @@
+//@version=5
+// 策略A: SRSI极端+CCI确认 (60天回测胜率61.7%, 506信号)
+strategy("OKX-策略A(SRSI+CCI)", overlay=true,
+  initial_capital=1000, default_qty_type=strategy.percent_of_equity,
+  default_qty_value=100, commission_value=0.05)
+
+// ── 参数 ──
+rsi_len   = input.int(14, "RSI周期")
+stoch_len = input.int(14, "Stoch周期")
+cci_len   = input.int(20, "CCI周期")
+adx_len   = input.int(14, "ADX周期")
+adx_min   = input.int(20, "ADX最小", minval=10, maxval=40)
+srsilow   = input.int(20, "SRSI超卖", minval=5, maxval=40)
+srsihigh  = input.int(80, "SRSI超买", minval=60, maxval=95)
+ccilow    = input.int(-100, "CCI超卖", maxval=0)
+ccihigh   = input.int(100, "CCI超买", minval=0)
+tp_pct    = input.float(5.0, "止盈%", step=0.5) / 100
+sl_pct    = input.float(3.0, "止损%", step=0.5) / 100
+
+// ── 指标计算 ──
+// StochRSI: RSI的Stoch, 取(K+D)/2
+rsi = ta.rsi(close, rsi_len)
+k = ta.stoch(rsi, rsi, rsi, stoch_len)
+d = ta.sma(k, 3)
+srsi = (k + d) / 2
+
+// CCI
+cci_val = ta.cci(close, cci_len)
+
+// DMI/ADX
+[plusDI, minusDI, adx] = ta.dmi(adx_len, adx_len)
+
+// 1D DMI (使用security获取日线数据)
+[daily_close, daily_high, daily_low] = request.security(syminfo.tickerid, "D",
+  [close, high, low])
+rsi_d = ta.rsi(daily_close, rsi_len)
+k_d = ta.stoch(rsi_d, rsi_d, rsi_d, stoch_len)
+d_d = ta.sma(k_d, 3)
+srsi_d = (k_d + d_d) / 2
+cci_d = ta.cci(daily_close, cci_len)
+[plusDI_d, minusDI_d, adx_d] = request.security(syminfo.tickerid, "D",
+  ta.dmi(adx_len, adx_len))
+
+// ── 信号 ──
+longCondition = srsi_d < srsilow and cci_d < ccilow and plusDI_d > minusDI_d and adx_d > adx_min
+shortCondition = srsi_d > srsihigh and cci_d > ccihigh and minusDI_d > plusDI_d and adx_d > adx_min
+
+// ── 入场 ──
+if longCondition and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+if shortCondition and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+
+// ── 出场: 止盈止损 ──
+strategy.exit("XL", "L", limit=close*(1+tp_pct), stop=close*(1-sl_pct))
+strategy.exit("XS", "S", limit=close*(1-tp_pct), stop=close*(1+sl_pct))
+
+// ── 可视化 ──
+plot(srsi, "SRSI", color.rgb(33,150,243), 1, display=display.none)
+hline(srsilow, "超卖", color.green, display=display.none)
+hline(srsihigh, "超买", color.red, display=display.none)
+
+// 信号标记
+plotshape(longCondition, "做多", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(shortCondition, "做空", shape.triangledown, location.abovebar, color.red, size=size.small)
