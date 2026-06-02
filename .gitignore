@@ -1,6 +1,3 @@
-.pushplus_token
-.wecom_webhook
-.serverchan_key
 __pycache__/
 *.pyc
 .DS_Store
@@ -17,3 +14,7 @@ github_key.pub
 .alert_cache.json
 .last_scan_trigger
 .last_retrigger
+.okx_credentials
+.pushplus_token
+.wecom_webhook
+.serverchan_key
