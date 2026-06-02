@@ -326,7 +326,197 @@ def generate_recommendations(data):
     
     print(f"\n📋 推荐配置: 阈值≥{best_th[0]}, SRSI<20做多/SRSI>80做空, 方向权重1:1:2, 无ADX过滤")
 
-# ── 主函数 ──
+# ── 信号组合测试 ──
+
+def test_signal_combinations(data):
+    """对比不同信号组合的胜率"""
+    print("\n" + "="*70)
+    print("🔀 不同信号组合对比分析 (24H)")
+    print("="*70)
+    
+    def eval_combo(name, rule_fn, only_bull=False, only_bear=False):
+        """评估一个信号规则"""
+        wins, pcts = [], []
+        for r in data:
+            if r.get("win_24H") is None: continue
+            direction, triggered = rule_fn(r)
+            if not triggered: continue
+            if direction == "多" and only_bear: continue
+            if direction == "空" and only_bull: continue
+            wins.append(r["win_24H"])
+            pcts.append(r.get("pct_24H", 0) or 0)
+        if not wins: return (name, 0, 0, 0)
+        wr = sum(wins)/len(wins)*100
+        avg = sum(pcts)/len(pcts)
+        return (name, len(wins), wr, avg)
+    
+    combos = []
+    
+    # 1. DMI only (纯方向分，无SRSI)
+    def dmi_only(r):
+        d = {t: r.get(f"dmi_{t.lower()}", "N/A") for t in ["1H","4H","1D"]}
+        dirs = list(d.values())
+        bull_count = dirs.count("多")
+        bear_count = dirs.count("空")
+        if bull_count >= 2:
+            score = sum(1 if d[t]=="多" else 0 for t in ["1H","4H"]) + (2 if d["1D"]=="多" else 0)
+            return ("多", score >= 4)
+        if bear_count >= 2:
+            score = sum(1 if d[t]=="空" else 0 for t in ["1H","4H"]) + (2 if d["1D"]=="空" else 0)
+            return ("空", score >= 4)
+        return ("N/A", False)
+    combos.append(eval_combo("DMI纯方向 (≥2TF一致)", dmi_only))
+    
+    # 2. SRSI only (只看极端值)
+    def srsi_only(r):
+        s1h = r.get("srsi_1h"); s4h = r.get("srsi_4h"); s1d = r.get("srsi_1d")
+        bull_score = 0; bear_score = 0
+        for s, tf in [(s1h,"1H"),(s4h,"4H"),(s1d,"1D")]:
+            if s is None: continue
+            w = 2 if tf=="1D" else 1
+            if s < 20: bull_score += w
+            if s > 80: bear_score += w
+        if bull_score >= 3: return ("多", True)
+        if bear_score >= 3: return ("空", True)
+        return ("N/A", False)
+    combos.append(eval_combo("SRSI极端值 (SRSI<20多/>80空)", srsi_only))
+    
+    # 3. DMI + SRSI (当前策略)
+    def dmi_srsi(r):
+        params = {"alert_threshold": 5, "srsi_os": 20, "srsi_ob": 80,
+                  "dir_1h": 1, "dir_4h": 1, "dir_1d": 2, "use_adx": False}
+        bull, bear = rescore(r, params)
+        if bull >= bear and bull >= 5: return ("多", True)
+        if bear > bull and bear >= 5: return ("空", True)
+        return ("N/A", False)
+    combos.append(eval_combo("DMI+SRSI (当前策略 ≥5)", dmi_srsi))
+    
+    # 4. 多TF严格一致 (3/3方向相同)
+    def tf_strict(r):
+        d = {t: r.get(f"dmi_{t.lower()}", "N/A") for t in ["1H","4H","1D"]}
+        if d["1H"] == d["4H"] == d["1D"] == "多":
+            return ("多", True)
+        if d["1H"] == d["4H"] == d["1D"] == "空":
+            return ("空", True)
+        return ("N/A", False)
+    combos.append(eval_combo("3TF严格一致 (全多/全空)", tf_strict))
+    
+    # 5. 1D主导 (只跟1D方向)
+    def d1_lead(r):
+        d1d = r.get("dmi_1d", "N/A")
+        s1d = r.get("srsi_1d")
+        if d1d == "多": return ("多", True)
+        if d1d == "空": return ("空", True)
+        return ("N/A", False)
+    combos.append(eval_combo("仅跟1D方向", d1_lead))
+    
+    # 6. 1D SRSI 极端 + DMI确认
+    def d1_srsi_dmi(r):
+        d1d = r.get("dmi_1d", "N/A")
+        s1d = r.get("srsi_1d")
+        if d1d == "多" and s1d is not None and s1d < 20: return ("多", True)
+        if d1d == "空" and s1d is not None and s1d > 80: return ("空", True)
+        return ("N/A", False)
+    combos.append(eval_combo("1D SRSI极端 + 1D方向确认", d1_srsi_dmi))
+    
+    # 7. ADX>25 强趋势 + DMI
+    def strong_trend(r):
+        d1d = r.get("dmi_1d", "N/A")
+        adx = r.get("adx_1d")
+        if d1d == "多" and adx is not None and adx > 25: return ("多", True)
+        if d1d == "空" and adx is not None and adx > 25: return ("空", True)
+        return ("N/A", False)
+    combos.append(eval_combo("强趋势 (ADX>25 + 1D方向)", strong_trend))
+    
+    # 8. DMI + 摆动点双重确认
+    def dmi_swing(r):
+        dmi = {t: r.get(f"dmi_{t.lower()}", "N/A") for t in ["1H","4H","1D"]}
+        sw = {t: r.get(f"sw_{t.lower()}", "N/A") for t in ["1H","4H","1D"]}
+        agree = sum(1 for t in ["1H","4H","1D"] if dmi[t] == sw[t] and dmi[t] in ("多","空"))
+        if agree >= 2:
+            if dmi["1D"] == "多": return ("多", True)
+            if dmi["1D"] == "空": return ("空", True)
+        return ("N/A", False)
+    combos.append(eval_combo("DMI+摆动点双重确认", dmi_swing))
+    
+    # Print results
+    combos.sort(key=lambda x: x[2], reverse=True)
+    print(f"{'信号规则':<36} {'信号数':>6} {'24H胜率':>9} {'平均收益%':>9}")
+    print("-" * 64)
+    for name, n, wr, avg in combos:
+        bar = "█" * int(wr/5) if wr > 0 else ""
+        print(f"{name:<36} {n:>6}  {wr:>7.1f}%  {avg:>8.2f}%  {bar}")
+    
+    # Best combo recommendation
+    best = max(combos, key=lambda x: (x[2], -x[1]) if x[1] > 10 else (0, 0))
+    best_balanced = max(combos, key=lambda x: x[2] * min(x[1], 500))
+    print(f"\n💡 最高胜率: {best[0]} ({best[2]:.1f}%, {best[1]}信号)")
+    if best_balanced[0] != best[0]:
+        print(f"💡 最佳平衡: {best_balanced[0]} ({best_balanced[2]:.1f}%, {best_balanced[1]}信号)")
+
+def analyze_entry_confirmation(data):
+    """测试不同入场确认规则的效果"""
+    print("\n" + "="*70)
+    print("✅ 入场确认规则对比")
+    print("="*70)
+    
+    rules = []
+    
+    # Base: DMI + SRSI standard signal
+    def base_signal(r):
+        params = {"alert_threshold": 5, "srsi_os": 20, "srsi_ob": 80,
+                  "dir_1h": 1, "dir_4h": 1, "dir_1d": 2, "use_adx": False}
+        bull, bear = rescore(r, params)
+        if bull >= bear and bull >= 5: return "多"
+        if bear > bull and bear >= 5: return "空"
+        return None
+    
+    # Confirmation filters
+    confirmations = [
+        ("无确认 (基准)", lambda r, d: True),
+        ("1H同向确认", lambda r, d: r.get("dmi_1h") == d),
+        ("4H同向确认", lambda r, d: r.get("dmi_4h") == d),
+        ("1D同向确认", lambda r, d: r.get("dmi_1d") == d),
+        ("1H+4H同向", lambda r, d: r.get("dmi_1h") == d and r.get("dmi_4h") == d),
+        ("摆动点一致", lambda r, d: r.get("sw_1d") == d),
+        ("ADX>20", lambda r, d: (r.get("adx_1d") or 0) > 20),
+        ("ADX>25", lambda r, d: (r.get("adx_1d") or 0) > 25),
+    ]
+    
+    print(f"{'确认规则':<20} {'信号数':>6} {'过滤率':>7} {'24H胜率':>9} {'提升':>7}")
+    print("-" * 54)
+    
+    base_signals = []
+    for r in data:
+        if r.get("win_24H") is None: continue
+        d = base_signal(r)
+        if d: base_signals.append((r, d))
+    
+    base_wr = sum(s[0]["win_24H"] for s in base_signals)/len(base_signals)*100 if base_signals else 0
+    print(f"{'无确认 (基准)':<20} {len(base_signals):>6} {'-':>7} {base_wr:>8.1f}% {'-':>7}")
+    
+    for conf_name, conf_fn in confirmations[1:]:  # skip baseline
+        filtered = [(r, d) for r, d in base_signals if conf_fn(r, d)]
+        if not filtered: continue
+        wr = sum(s[0]["win_24H"] for s in filtered)/len(filtered)*100
+        ratio = len(filtered)/len(base_signals)*100
+        improvement = wr - base_wr
+        sign = "+" if improvement > 0 else ""
+        print(f"{conf_name:<20} {len(filtered):>6} {ratio:>6.1f}% {wr:>8.1f}% {sign}{improvement:>+5.1f}%")
+    
+    # Best confirmation
+    best_conf = None
+    best_improve = -999
+    for conf_name, conf_fn in confirmations[1:]:
+        filtered = [(r, d) for r, d in base_signals if conf_fn(r, d)]
+        if not filtered or len(filtered) < 10: continue
+        wr = sum(s[0]["win_24H"] for s in filtered)/len(filtered)*100
+        if wr - base_wr > best_improve:
+            best_improve = wr - base_wr
+            best_conf = (conf_name, wr, len(filtered))
+    
+    if best_conf and best_improve > 0:
+        print(f"\n💡 最佳确认规则: {best_conf[0]} (胜率+{best_improve:.1f}%, {best_conf[2]}信号)")
 def main():
     print("="*70)
     print("🔬 OKX 策略参数优化器")
@@ -345,6 +535,8 @@ def main():
     analyze_srsi_boundaries(data)
     analyze_adx_impact(data)
     analyze_symbol_winrates(data)
+    test_signal_combinations(data)
+    analyze_entry_confirmation(data)
     generate_recommendations(data)
 
 if __name__ == "__main__":
