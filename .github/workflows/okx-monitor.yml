@@ -45,3 +45,14 @@ jobs:
           path: okx_data/scans/${{ steps.date.outputs.date }}.csv
           if-no-files-found: warn
           overwrite: true
+
+      - name: Generate viewer HTML
+        run: python analysis/build_viewer.py
+
+      - name: Upload viewer HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewer
+          path: okx_data/viewer.html
+          if-no-files-found: warn
+          overwrite: true
