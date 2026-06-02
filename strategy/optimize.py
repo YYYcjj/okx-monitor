@@ -18,15 +18,20 @@ SCAN_DIR = os.path.join(PROJECT_ROOT, "okx_data", "scans")
 def load_backtest():
     """加载回测数据"""
     rows = []
+    numeric_fields = ('srsi_1h','srsi_4h','srsi_1d','pct_4H','pct_12H','pct_24H',
+                      'adx_1h','adx_4h','adx_1d','macd_1h','macd_4h','macd_1d',
+                      'bbp_1h','bbp_4h','bbp_1d','cci_1h','cci_4h','cci_1d')
+    int_fields = ('score',)
+    bool_fields = ('win_4H','win_12H','win_24H')
     with open(BT_FILE, 'r') as f:
         for r in csv.DictReader(f):
-            for k in ('srsi_1h','srsi_4h','srsi_1d','pct_4H','pct_12H','pct_24H'):
+            for k in numeric_fields:
                 try: r[k] = None if r.get(k,'') == '' else float(r.get(k,''))
                 except: r[k] = None
-            for k in ('score',):
+            for k in int_fields:
                 try: r[k] = int(r[k])
                 except: pass
-            for k in ('win_4H','win_12H','win_24H'):
+            for k in bool_fields:
                 r[k] = True if r.get(k) == '1' else (False if r.get(k) == '0' else None)
             rows.append(r)
     return rows
@@ -438,6 +443,74 @@ def test_signal_combinations(data):
             if dmi["1D"] == "空": return ("空", True)
         return ("N/A", False)
     combos.append(eval_combo("DMI+摆动点双重确认", dmi_swing))
+    
+    # ── 新指标信号 ──
+    # 9. EMA交叉
+    def ema_cross_signal(r):
+        dirs = [r.get("ema_1h"), r.get("ema_4h"), r.get("ema_1d")]
+        bull = dirs.count("多"); bear = dirs.count("空")
+        if bull >= 2: return ("多", True)
+        if bear >= 2: return ("空", True)
+        return ("N/A", False)
+    if any(r.get("ema_1h") for r in data[:5]):
+        combos.append(eval_combo("EMA交叉 (≥2TF一致)", ema_cross_signal))
+    
+    # 10. 布林带突破
+    def boll_signal(r):
+        dirs = [r.get("boll_1h"), r.get("boll_4h"), r.get("boll_1d")]
+        bull = sum(1 for d in dirs if d == "多"); bear = sum(1 for d in dirs if d == "空")
+        if bull >= 2: return ("多", True)
+        if bear >= 2: return ("空", True)
+        return ("N/A", False)
+    if any(r.get("boll_1h") for r in data[:5]):
+        combos.append(eval_combo("布林带突破 (≥2TF)", boll_signal))
+    
+    # 11. CCI极端
+    def cci_signal(r):
+        cci_1h = r.get("cci_1h"); cci_4h = r.get("cci_4h"); cci_1d = r.get("cci_1d")
+        cci_dirs = [r.get("cci_dir_1h"), r.get("cci_dir_4h"), r.get("cci_dir_1d")]
+        bull = sum(1 for d in cci_dirs if d == "多"); bear = sum(1 for d in cci_dirs if d == "空")
+        extreme = (cci_1d is not None and abs(cci_1d) > 150)
+        if bull >= 2 and extreme: return ("多", True)
+        if bear >= 2 and extreme: return ("空", True)
+        return ("N/A", False)
+    if any(r.get("cci_1h") for r in data[:5]):
+        combos.append(eval_combo("CCI极端 (>±150 + ≥2TF)", cci_signal))
+    
+    # 12. MACD方向
+    def macd_signal(r):
+        macds = [r.get("macd_1h"), r.get("macd_4h"), r.get("macd_1d")]
+        valid = [m for m in macds if m is not None]
+        if not valid: return ("N/A", False)
+        bull = sum(1 for m in valid if m > 0); bear = sum(1 for m in valid if m < 0)
+        if bull >= 2: return ("多", True)
+        if bear >= 2: return ("空", True)
+        return ("N/A", False)
+    if any(r.get("macd_1h") for r in data[:5]):
+        combos.append(eval_combo("MACD方向 (≥2TF)", macd_signal))
+    
+    # 13. 最佳混合: DMI + EMA双重确认
+    def dmi_ema_combo(r):
+        dmi_dirs = [r.get("dmi_1h"), r.get("dmi_4h"), r.get("dmi_1d")]
+        ema_dirs = [r.get("ema_1h"), r.get("ema_4h"), r.get("ema_1d")]
+        # DMI和EMA都同意
+        agree = sum(1 for i in range(3) if dmi_dirs[i] == ema_dirs[i] and dmi_dirs[i] in ("多","空"))
+        if agree >= 2:
+            if dmi_dirs[2] == "多": return ("多", True)
+            if dmi_dirs[2] == "空": return ("空", True)
+        return ("N/A", False)
+    if any(r.get("ema_1h") for r in data[:5]):
+        combos.append(eval_combo("DMI+EMA双重确认", dmi_ema_combo))
+    
+    # 14. SRSI极端 + CCI确认
+    def srsi_cci_combo(r):
+        s1d = r.get("srsi_1d"); c1d = r.get("cci_1d")
+        if s1d is None or c1d is None: return ("N/A", False)
+        if s1d < 20 and c1d < -100: return ("多", True)
+        if s1d > 80 and c1d > 100: return ("空", True)
+        return ("N/A", False)
+    if any(r.get("cci_1h") for r in data[:5]):
+        combos.append(eval_combo("SRSI极端+CCI确认", srsi_cci_combo))
     
     # Print results
     combos.sort(key=lambda x: x[2], reverse=True)

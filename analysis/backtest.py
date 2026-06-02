@@ -16,7 +16,9 @@ from collections import defaultdict
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from shared.indicators import (
     calc_rsi, calc_stoch_rsi, calc_atr,
-    trend_dmi, trend_swing, calc_multi_score
+    trend_dmi, trend_swing, calc_multi_score,
+    calc_macd, calc_bollinger, calc_cci,
+    trend_ema_cross, trend_bollinger, trend_cci
 )
 
 # ── 配置 ──
@@ -193,6 +195,26 @@ def backtest_symbol(sym, data_1h, data_4h, data_1d):
         srsi_4h = calc_stoch_rsi(closes_4h)
         srsi_1d = calc_stoch_rsi(closes_1d)
         
+        # 新增指标
+        macd_1h, _, _ = calc_macd(closes_1h)
+        macd_4h, _, _ = calc_macd(closes_4h)
+        macd_1d, _, _ = calc_macd(closes_1d)
+        _, _, _, bbw_1h, bbp_1h = calc_bollinger(closes_1h)
+        _, _, _, bbw_4h, bbp_4h = calc_bollinger(closes_4h)
+        _, _, _, bbw_1d, bbp_1d = calc_bollinger(closes_1d)
+        cci_1h = calc_cci(new_1h)
+        cci_4h = calc_cci(new_4h)
+        cci_1d = calc_cci(new_1d)
+        ema_1h = trend_ema_cross(new_1h)
+        ema_4h = trend_ema_cross(new_4h)
+        ema_1d = trend_ema_cross(new_1d)
+        boll_1h = trend_bollinger(new_1h)
+        boll_4h = trend_bollinger(new_4h)
+        boll_1d = trend_bollinger(new_1d)
+        cci_dir_1h = trend_cci(new_1h)
+        cci_dir_4h = trend_cci(new_4h)
+        cci_dir_1d = trend_cci(new_1d)
+        
         trends_dmi = {"1H": dmi_1h, "4H": dmi_4h, "1D": dmi_1d}
         trends_sw = {"1H": sw_1h, "4H": sw_4h, "1D": sw_1d}
         srsis = {"1H": round(srsi_1h, 1) if srsi_1h else None,
@@ -225,7 +247,15 @@ def backtest_symbol(sym, data_1h, data_4h, data_1d):
                     "score": score,
                     "entry": entry_price,
                     "dmi_1h": dmi_1h, "dmi_4h": dmi_4h, "dmi_1d": dmi_1d,
+                    "sw_1h": sw_1h, "sw_4h": sw_4h, "sw_1d": sw_1d,
                     "srsi_1h": srsi_1h, "srsi_4h": srsi_4h, "srsi_1d": srsi_1d,
+                    "adx_1h": adx_1h, "adx_4h": adx_4h, "adx_1d": adx_1d,
+                    "macd_1h": macd_1h, "macd_4h": macd_4h, "macd_1d": macd_1d,
+                    "bbp_1h": bbp_1h, "bbp_4h": bbp_4h, "bbp_1d": bbp_1d,
+                    "cci_1h": cci_1h, "cci_4h": cci_4h, "cci_1d": cci_1d,
+                    "ema_1h": ema_1h, "ema_4h": ema_4h, "ema_1d": ema_1d,
+                    "boll_1h": boll_1h, "boll_4h": boll_4h, "boll_1d": boll_1d,
+                    "cci_dir_1h": cci_dir_1h, "cci_dir_4h": cci_dir_4h, "cci_dir_1d": cci_dir_1d,
                 }
                 
                 for label, offset_h in [("4H", 4), ("12H", 12), ("24H", 24)]:
@@ -326,7 +356,12 @@ def analyze(all_signals):
     csv_file = os.path.join(PROJECT_ROOT, "okx_data", "backtest_results.csv")
     with open(csv_file, 'w') as f:
         keys = ["symbol","time_str","std","direction","score","entry",
-                "dmi_1h","dmi_4h","dmi_1d","srsi_1h","srsi_4h","srsi_1d",
+                "dmi_1h","dmi_4h","dmi_1d","sw_1h","sw_4h","sw_1d",
+                "srsi_1h","srsi_4h","srsi_1d","adx_1h","adx_4h","adx_1d",
+                "macd_1h","macd_4h","macd_1d","bbp_1h","bbp_4h","bbp_1d",
+                "cci_1h","cci_4h","cci_1d",
+                "ema_1h","ema_4h","ema_1d","boll_1h","boll_4h","boll_1d",
+                "cci_dir_1h","cci_dir_4h","cci_dir_1d",
                 "win_4H","pct_4H","win_12H","pct_12H","win_24H","pct_24H"]
         f.write(",".join(keys) + "\n")
         for s in all_signals:
