@@ -2,6 +2,22 @@
 
 每15分钟扫描8个加密货币品种，DMI/ADX 方向判断 + StochRSI 极端值评分，通过 PushPlus 推送到微信。
 
+## 项目结构
+
+```
+okx-monitor/
+├── monitor/               # 项目1: 实时监控提醒
+│   └── okx_monitor.py
+├── analysis/              # 项目2: 历史数据分析
+│   ├── backtest.py        #   回测引擎
+│   ├── analyze_trades.py  #   交易分析
+│   └── build_viewer.py    #   数据查看器生成
+├── strategy/              # 项目3: 策略优化（待开发）
+├── shared/                # 共享函数库
+│   └── indicators.py      #   DMI/StochRSI/摆动点/评分
+└── .github/workflows/     # CI/CD
+```
+
 ## 策略算法
 
 | 组件 | 方法 | 参数 |

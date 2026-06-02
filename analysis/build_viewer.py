@@ -6,9 +6,10 @@ import os
 from glob import glob
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SCAN_DIR = os.path.join(SCRIPT_DIR, "okx_data", "scans")
-BT_FILE = os.path.join(SCRIPT_DIR, "okx_data", "backtest_results.csv")
-OUTPUT = os.path.join(SCRIPT_DIR, "okx_data", "viewer.html")
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+SCAN_DIR = os.path.join(PROJECT_ROOT, "okx_data", "scans")
+BT_FILE = os.path.join(PROJECT_ROOT, "okx_data", "backtest_results.csv")
+OUTPUT = os.path.join(PROJECT_ROOT, "okx_data", "viewer.html")
 
 def load_scans():
     files = sorted(glob(os.path.join(SCAN_DIR, "*.csv")), reverse=True)

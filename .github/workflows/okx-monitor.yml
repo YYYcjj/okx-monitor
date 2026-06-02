@@ -34,7 +34,7 @@ jobs:
         continue-on-error: true
 
       - name: Run monitor (appends to CSV)
-        run: python okx_monitor.py
+        run: python monitor/okx_monitor.py
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
 
