@@ -13,7 +13,6 @@ import sys
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from shared.indicators import (
     calc_rsi, calc_stoch_rsi, calc_atr,
     trend_dmi, trend_swing, calc_multi_score,

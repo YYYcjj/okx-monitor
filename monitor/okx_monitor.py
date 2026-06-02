@@ -17,8 +17,7 @@ import sys
 import csv
 from datetime import datetime, timezone, timedelta
 
-# 共享指标库
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+# 共享指标库 (使用 python -m monitor.okx_monitor 时自动可用)
 from shared.indicators import (
     fetch_ohlcv, calc_rsi, calc_stoch_rsi, calc_atr,
     trend_dmi, trend_swing, calc_multi_score, calc_score, adx_weight
