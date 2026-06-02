@@ -6,7 +6,14 @@ __pycache__/
 .DS_Store
 monitor_log.txt
 .workbuddy/
-.gitignore: okx_data/ okx_history.zip
 okx_data/
 okx_history.zip
 *.csv
+
+# 敏感文件 - 绝不提交
+github_key
+github_key.pub
+.ssh_tmp/
+.alert_cache.json
+.last_scan_trigger
+.last_retrigger
