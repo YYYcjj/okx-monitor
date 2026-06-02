@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 // 策略B: 布林带突破 (60天回测胜率47.6%, 1574信号)
 strategy("OKX-策略B(布林带突破)", overlay=true,
   initial_capital=1000, default_qty_type=strategy.percent_of_equity,

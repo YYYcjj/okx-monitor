@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 // 策略C: EMA趋势跟踪 (60天回测胜率44.1%, 3191信号)
 strategy("OKX-策略C(EMA趋势)", overlay=true,
   initial_capital=1000, default_qty_type=strategy.percent_of_equity,
