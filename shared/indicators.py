@@ -179,3 +179,93 @@ def adx_weight(adx):
     if adx < 20: return 0.5
     elif adx < 25: return 0.75
     else: return 1.0
+
+# ── EMA ──
+def calc_ema(closes, period):
+    """指数移动平均"""
+    if len(closes) < period:
+        return None
+    k = 2 / (period + 1)
+    ema = sum(closes[:period]) / period
+    for price in closes[period:]:
+        ema = price * k + ema * (1 - k)
+    return ema
+
+# ── MACD ──
+def calc_macd(closes, fast=12, slow=26, signal=9):
+    """MACD: 返回 (macd线, signal线, 柱)"""
+    if len(closes) < slow + signal:
+        return None, None, None
+    ema_fast = calc_ema(closes, fast)
+    ema_slow = calc_ema(closes, slow)
+    if ema_fast is None or ema_slow is None:
+        return None, None, None
+    macd_line = ema_fast - ema_slow
+    
+    # 需要历史MACD值计算signal线，简化：只用当前值
+    # 实际需要完整序列，这里返回当前快慢线差值作为近似
+    return macd_line, None, None
+
+# ── 布林带 ──
+def calc_bollinger(closes, period=20, std_dev=2):
+    """布林带: 返回 (中轨, 上轨, 下轨, 带宽%, %B)"""
+    if len(closes) < period:
+        return None, None, None, None, None
+    import math
+    window = closes[-period:]
+    mid = sum(window) / period
+    variance = sum((x - mid) ** 2 for x in window) / period
+    std = math.sqrt(variance)
+    upper = mid + std_dev * std
+    lower = mid - std_dev * std
+    bw = (upper - lower) / mid * 100 if mid > 0 else 0
+    last = closes[-1]
+    b_pct = (last - lower) / (upper - lower) if upper != lower else 0.5
+    return mid, upper, lower, bw, b_pct
+
+# ── CCI ──
+def calc_cci(candles, period=20):
+    """商品通道指数 CCI"""
+    if len(candles) < period:
+        return None
+    tp = [(c["h"] + c["l"] + c["c"]) / 3 for c in candles]
+    window = tp[-period:]
+    sma = sum(window) / period
+    mad = sum(abs(x - sma) for x in window) / period
+    if mad == 0:
+        return 0
+    return (tp[-1] - sma) / (0.015 * mad)
+
+# ── 趋势方向: EMA交叉 ──
+def trend_ema_cross(candles, fast=12, slow=26):
+    """EMA快慢线交叉: 快线>慢线→多, 否则→空"""
+    closes = [c["c"] for c in candles]
+    ef = calc_ema(closes, fast)
+    es = calc_ema(closes, slow)
+    if ef is None or es is None:
+        return "N/A"
+    return "多" if ef > es else "空"
+
+# ── 趋势方向: 布林带 ──
+def trend_bollinger(candles):
+    """布林带位置: %B>0.7→高位, %B<0.3→低位, 突破上/下轨"""
+    closes = [c["c"] for c in candles]
+    _, upper, lower, _, b_pct = calc_bollinger(closes)
+    if b_pct is None:
+        return "N/A"
+    last = closes[-1]
+    if last > upper: return "空"  # 突破上轨→超买
+    if last < lower: return "多"  # 突破下轨→超卖
+    if b_pct > 0.7: return "空"
+    if b_pct < 0.3: return "多"
+    return "N/A"  # 中性区域
+
+# ── 趋势方向: CCI ──
+def trend_cci(candles):
+    """CCI方向: >100超买→预测空, <-100超卖→预测多"""
+    cci = calc_cci(candles)
+    if cci is None: return "N/A"
+    if cci > 100: return "空"
+    if cci < -100: return "多"
+    if cci > 0: return "多"
+    return "空"

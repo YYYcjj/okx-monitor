@@ -517,6 +517,110 @@ def analyze_entry_confirmation(data):
     
     if best_conf and best_improve > 0:
         print(f"\n💡 最佳确认规则: {best_conf[0]} (胜率+{best_improve:.1f}%, {best_conf[2]}信号)")
+
+def analyze_srsi_dmi_matrix(data):
+    """SRSI极端 × DMI方向 交叉矩阵"""
+    print("\n" + "="*70)
+    print("🧩 SRSI极端 × DMI方向 交叉矩阵 (24H胜率)")
+    print("="*70)
+    
+    dmi_signals = [r for r in data if r["std"] == "DMI纯分" and r.get("win_24H") is not None]
+    
+    conditions = [
+        ("1D SRSI<20", lambda r: r.get("srsi_1d") and r["srsi_1d"] < 20),
+        ("4H SRSI<20", lambda r: r.get("srsi_4h") and r["srsi_4h"] < 20),
+        ("1H SRSI<20", lambda r: r.get("srsi_1h") and r["srsi_1h"] < 20),
+        ("1D SRSI>80", lambda r: r.get("srsi_1d") and r["srsi_1d"] > 80),
+        ("4H SRSI>80", lambda r: r.get("srsi_4h") and r["srsi_4h"] > 80),
+        ("1H SRSI>80", lambda r: r.get("srsi_1h") and r["srsi_1h"] > 80),
+    ]
+    
+    dmi_tfs = ["1H", "4H", "1D"]
+    
+    print(f"{'SRSI条件\\DMI':<18}", end="")
+    for tf in dmi_tfs: print(f" {tf}多:>7", end="")
+    print(f" {'综合':>7}")
+    print("-" * 48)
+    
+    for label, cond in conditions:
+        subset = [r for r in dmi_signals if cond(r)]
+        if not subset: continue
+        print(f"{label:<18}", end="")
+        total_wr = 0
+        for tf in dmi_tfs:
+            dmi_key = f"dmi_{tf.lower()}"
+            tf_sub = [r for r in subset if r.get(dmi_key) == ("多" if "SRSI<" in label else "空")]
+            if tf_sub:
+                wr = sum(r["win_24H"] for r in tf_sub)/len(tf_sub)*100
+                print(f" {wr:>6.1f}%", end="")
+                total_wr += wr * len(tf_sub)
+            else:
+                print(f" {'-':>6}", end="")
+        if subset:
+            overall = sum(r["win_24H"] for r in subset)/len(subset)*100
+            print(f" {overall:>6.1f}%", end="")
+        print()
+
+def analyze_timeframe_priority(data):
+    """哪个时间框架的指标最重要"""
+    print("\n" + "="*70)
+    print("⏱️ 时间框架优先级分析")
+    print("="*70)
+    
+    dmi_signals = [r for r in data if r["std"] == "DMI纯分" and r.get("win_24H") is not None]
+    
+    # Test: when 1D direction is right vs wrong
+    print(f"\n{'指标':<18} {'与最终方向':>10} {'信号数':>6} {'24H胜率':>9}")
+    print("-" * 48)
+    
+    for tf in ["1H", "4H", "1D"]:
+        dmi_key = f"dmi_{tf.lower()}"
+        # When this TF's DMI matches the signal direction
+        for direction in ["多", "空"]:
+            label = f"{tf} DMI={direction}"
+            subset = [r for r in dmi_signals if r.get(dmi_key) == direction 
+                     and r["direction"] == direction]
+            if subset:
+                wr = sum(r["win_24H"] for r in subset)/len(subset)*100
+                print(f"{label:<18} {'→ 同向':>10} {len(subset):>6}  {wr:>7.1f}%")
+
+    # 1D as anchor
+    print(f"\n─ 1D方向作为锚点 ─")
+    for d1d in ["多", "空"]:
+        anchor = [r for r in dmi_signals if r.get("dmi_1d") == d1d]
+        if not anchor: continue
+        # When 1D matches vs doesn't match
+        match = [r for r in anchor if r["direction"] == d1d]
+        mismatch = [r for r in anchor if r["direction"] != d1d]
+        print(f"  1D={d1d}: 同向{match and len(match) or 0}信号({match and sum(r['win_24H']for r in match)/len(match)*100 or 0:.0f}%) "
+              f"反向{mismatch and len(mismatch) or 0}信号({mismatch and sum(r['win_24H']for r in mismatch)/len(mismatch)*100 or 0:.0f}%)")
+
+def analyze_volatility_context(data):
+    """波动率(ADX)环境对胜率的影响"""
+    print("\n" + "="*70)
+    print("📈 波动率环境对胜率的影响")
+    print("="*70)
+    
+    dmi_signals = [r for r in data if r["std"] == "DMI纯分" and r.get("win_24H") is not None 
+                   and r.get("adx_1d") is not None]
+    
+    # ADX buckets
+    buckets = [(0, 15, "极弱趋势"), (15, 20, "弱趋势"), (20, 25, "趋势形成"), 
+               (25, 35, "强趋势"), (35, 100, "极强趋势")]
+    
+    print(f"{'ADX区间':<16} {'描述':<10} {'信号':>6} {'24H胜率':>9} {'多胜率':>7} {'空胜率':>7}")
+    print("-" * 60)
+    
+    for lo, hi, desc in buckets:
+        subset = [r for r in dmi_signals if lo <= r["adx_1d"] < hi]
+        if not subset: continue
+        wr = sum(r["win_24H"] for r in subset)/len(subset)*100
+        long = [r for r in subset if r["direction"] == "多"]
+        short = [r for r in subset if r["direction"] == "空"]
+        lwr = sum(r["win_24H"] for r in long)/len(long)*100 if long else 0
+        swr = sum(r["win_24H"] for r in short)/len(short)*100 if short else 0
+        print(f"ADX {lo}-{hi:<2}    {desc:<10} {len(subset):>6}  {wr:>7.1f}%  {lwr:>6.1f}%  {swr:>6.1f}%")
+
 def main():
     print("="*70)
     print("🔬 OKX 策略参数优化器")
@@ -537,6 +641,9 @@ def main():
     analyze_symbol_winrates(data)
     test_signal_combinations(data)
     analyze_entry_confirmation(data)
+    analyze_srsi_dmi_matrix(data)
+    analyze_timeframe_priority(data)
+    analyze_volatility_context(data)
     generate_recommendations(data)
 
 if __name__ == "__main__":
