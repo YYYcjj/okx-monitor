@@ -1,8 +1,15 @@
-name: OKX Strategy Monitor (15min)
+name: OKX Monitor (Push)
 
 on:
-  schedule:
-    - cron: '0,15,30,45 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'okx_monitor.py'
+      - 'shared/**'
+      - 'monitor/**'
+      - 'analysis/**'
+      - 'tools/**'
+      - 'strategy/**'
   workflow_dispatch:
 
 jobs:
@@ -43,34 +50,3 @@ jobs:
           path: okx_data/scans/${{ steps.date.outputs.date }}.csv
           if-no-files-found: warn
           overwrite: true
-
-      - name: Generate viewer HTML
-        run: python analysis/build_viewer.py
-
-      - name: Upload viewer HTML
-        uses: actions/upload-artifact@v4
-        with:
-          name: viewer
-          path: okx_data/viewer.html
-          if-no-files-found: warn
-          overwrite: true
-
-  # 每日更新热门品种列表 (UTC 23:00 = CST 7:00)
-  refresh-symbols:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install requests urllib3 --quiet
-      - run: python tools/pair_scanner.py
-      - name: Commit updated SYMBOLS.txt
-        run: |
-          git config user.name "OKX Bot"
-          git config user.email "bot@okx.local"
-          git add SYMBOLS.txt
-          git diff --staged --quiet || git commit -m "[auto] 每日热门品种更新" && git push
