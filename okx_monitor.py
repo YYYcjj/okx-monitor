@@ -368,9 +368,9 @@ def fmt_csv(v):
 GITHUB_EVENT = os.environ.get("GITHUB_EVENT_NAME", "")
 
 def should_push_full(now):
-    """日间整点±8分钟 + 非push事件 → 推送完整报表"""
+    """日间整点±15分钟（放宽窗口） + 非push事件 → 推送完整报表"""
     h, m = now.hour, now.minute
-    is_hourly = 7 <= h <= 23 and m <= 8
+    is_hourly = 7 <= h <= 23 and m <= 15
     is_schedule = GITHUB_EVENT in ("schedule", "workflow_dispatch", "")
     return is_hourly and is_schedule
 
