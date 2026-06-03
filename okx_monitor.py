@@ -597,8 +597,8 @@ def main():
     
     save_scan_csv(results, now)
     
-    # 按总分排序: 高分在前，同分则多优先
-    results.sort(key=lambda r: (r.get("bull",0)+r.get("bear",0), r.get("bull",0)), reverse=True)
+    # 多空分开排序
+    results.sort(key=lambda r: max(r.get("bull",0), r.get("bear",0)), reverse=True)
     
     if alerts:
         print(f"\n⚠️ 高分预警（≥{ALERT_THRESHOLD}分）：")
