@@ -77,6 +77,13 @@ if os.path.exists(EE_FILE):
     with open(EE_FILE, 'r', encoding='utf-8') as f:
         ee_data = json.load(f)
 
+# 加载交易优化分析
+TO_FILE = os.path.join(PROJECT_ROOT, "okx_data", "trade_optimization.json")
+to_data = {}
+if os.path.exists(TO_FILE):
+    with open(TO_FILE, 'r', encoding='utf-8') as f:
+        to_data = json.load(f)
+
 HTML = f'''<!DOCTYPE html>
 <html lang="zh">
 <head>
@@ -164,6 +171,23 @@ tr.win-4h{{background:#f0fff0}}
 .alert-card .ac-score{{font-size:20px;font-weight:bold}}
 .alert-card .ac-detail{{font-size:10px;color:#888;margin-top:2px}}
 .alert-card .ac-time{{font-size:10px;color:#aaa}}
+/* Trade analysis */
+.trade-stats{{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}}
+.trade-stat{{background:#fff;border-radius:8px;padding:10px 16px;box-shadow:0 1px 3px rgba(0,0,0,.08);min-width:100px;flex:1}}
+.trade-stat .ts-num{{font-size:24px;font-weight:bold}}
+.trade-stat .ts-label{{font-size:11px;color:#888;margin-top:2px}}
+.trade-grid{{display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap}}
+.trade-panel{{flex:1;min-width:300px;background:#fff;border-radius:8px;padding:12px 14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}}
+.trade-panel h3{{font-size:13px;margin:0 0 8px;color:#2c3e50}}
+.trade-row{{display:flex;align-items:center;padding:4px 0;font-size:12px;gap:8px;border-bottom:1px solid #f5f5f5}}
+.trade-row:last-child{{border-bottom:0}}
+.trade-sym{{font-weight:bold;min-width:50px}}
+.trade-dir{{min-width:24px;font-size:11px}}
+.trade-info{{flex:1;font-size:11px;color:#666}}
+.trade-pct{{font-weight:bold;min-width:60px;text-align:right;font-size:12px}}
+.cat-bar{{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px}}
+.cat-bar .cb-fill{{height:22px;border-radius:4px;transition:width .3s}}
+.cat-bar .cb-num{{min-width:50px;text-align:right;font-weight:bold;font-size:13px}}
 </style>
 </head>
 <body>
@@ -171,12 +195,49 @@ tr.win-4h{{background:#f0fff0}}
 <p class="sub" id="sub">扫描数据 · 回测结果</p>
 
 <div class="tabs">
-  <button class="tab active" onclick="switchTab('scan')">📡 实时扫描</button>
+  <button class="tab active" onclick="switchTab('trade')">💰 交易分析</button>
+  <button class="tab" onclick="switchTab('scan')">📡 实时扫描</button>
   <button class="tab" onclick="switchTab('pairwise')">🔗 组合胜率</button>
   <button class="tab" onclick="switchTab('backtest')">🔬 回测结果</button>
 </div>
 
-<!-- Scan Section -->
+<!-- Trade Analysis Section -->
+<div class="section show" id="tradeSection">
+  <div id="tradeContainer">
+    <div class="trade-stats" id="tradeStats"></div>
+    <div class="trade-grid">
+      <div class="trade-panel">
+        <h3>📋 交易分类</h3>
+        <div id="tradeChart"></div>
+      </div>
+      <div class="trade-panel">
+        <h3>🎯 止损建议</h3>
+        <div id="tradeStop"></div>
+      </div>
+    </div>
+    <div class="trade-grid">
+      <div class="trade-panel">
+        <h3>📌 止损太小 (止损后大涨)</h3>
+        <div id="tradeTight"></div>
+      </div>
+      <div class="trade-panel">
+        <h3>📌 止盈过早</h3>
+        <div id="tradeEarly"></div>
+      </div>
+    </div>
+    <div class="trade-grid">
+      <div class="trade-panel">
+        <h3>📌 方向错误 (典型)</h3>
+        <div id="tradeWrong"></div>
+      </div>
+      <div class="trade-panel">
+        <h3>📌 高位止盈 (精准)</h3>
+        <div id="tradePerfect"></div>
+      </div>
+    </div>
+  </div>
+  <div class="empty" id="tradeEmpty">暂无交易分析数据，请运行 python analysis/trade_optimizer.py</div>
+</div>
 <div class="section show" id="scanSection">
   <div class="alert-summary" id="alertSummary">
     <h3>⚠️ 今日高分预警</h3>
@@ -250,6 +311,7 @@ const SCAN_DATA = {json.dumps(scan_data, ensure_ascii=False)};
 const BT_DATA = {json.dumps(bt_data, ensure_ascii=False)};
 const PW_DATA = {json.dumps(pw_data, ensure_ascii=False)};
 const EE_DATA = {json.dumps(ee_data, ensure_ascii=False)};
+const TO_DATA = {json.dumps(to_data, ensure_ascii=False)};
 
 let scanRows=[], btRows=[], activeScanFile='', activeTab='scan';
 let sortState={{scan:{{col:'',dir:1}},bt:{{col:'',dir:1}}}};
@@ -260,9 +322,10 @@ function switchTab(tab){{
   activeTab=tab;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',false));
   document.querySelectorAll('.section').forEach(s=>s.classList.toggle('show',false));
-  if(tab==='scan'){{document.querySelector('.tabs .tab:nth-child(1)').classList.add('active');document.getElementById('scanSection').classList.add('show');if(!activeScanFile)initScan();}}
-  else if(tab==='pairwise'){{document.querySelector('.tabs .tab:nth-child(2)').classList.add('active');document.getElementById('pairwiseSection').classList.add('show');initPairwise();}}
-  else{{document.querySelector('.tabs .tab:nth-child(3)').classList.add('active');document.getElementById('backtestSection').classList.add('show');if(!btRows.length)initBacktest();}}
+  if(tab==='trade'){{document.querySelector('.tabs .tab:nth-child(1)').classList.add('active');document.getElementById('tradeSection').classList.add('show');initTrade();}}
+  else if(tab==='scan'){{document.querySelector('.tabs .tab:nth-child(2)').classList.add('active');document.getElementById('scanSection').classList.add('show');if(!activeScanFile)initScan();}}
+  else if(tab==='pairwise'){{document.querySelector('.tabs .tab:nth-child(3)').classList.add('active');document.getElementById('pairwiseSection').classList.add('show');initPairwise();}}
+  else{{document.querySelector('.tabs .tab:nth-child(4)').classList.add('active');document.getElementById('backtestSection').classList.add('show');if(!btRows.length)initBacktest();}}
 }}
 
 // ── Scan init ──
@@ -594,10 +657,104 @@ function renderHeatmap(){{
   hm.innerHTML=h;
 }}
 
+// ── Trade Analysis ──
+function initTrade(){{
+  const empty=document.getElementById('tradeEmpty');
+  const cont=document.getElementById('tradeContainer');
+  if(!TO_DATA.trades||!TO_DATA.trades.length){{
+    empty.style.display='block';cont.style.display='none';return;
+  }}
+  empty.style.display='none';cont.style.display='block';
+  renderTradeStats();
+  renderTradeChart();
+  renderTradeStop();
+  renderTradeExamples();
+}}
+
+function renderTradeStats(){{
+  const cats=TO_DATA.categories||{{}};
+  const total=(cats['方向错误']||0)+(cats['止损太小']||0)+(cats['止盈过早']||0)+(cats['高位止盈']||0);
+  let h='';
+  h+=`<div class="trade-stat"><div class="ts-num" style="color:#2c3e50">${{total}}</div><div class="ts-label">总交易</div></div>`;
+  h+=`<div class="trade-stat"><div class="ts-num" style="color:#e74c3c">${{cats['方向错误']||0}}</div><div class="ts-label">方向错误</div></div>`;
+  h+=`<div class="trade-stat"><div class="ts-num" style="color:#e67e22">${{cats['止损太小']||0}}</div><div class="ts-label">止损太小</div></div>`;
+  h+=`<div class="trade-stat"><div class="ts-num" style="color:#f39c12">${{cats['止盈过早']||0}}</div><div class="ts-label">止盈过早</div></div>`;
+  h+=`<div class="trade-stat"><div class="ts-num" style="color:#27ae60">${{cats['高位止盈']||0}}</div><div class="ts-label">高位止盈</div></div>`;
+  document.getElementById('tradeStats').innerHTML=h;
+}}
+
+function renderTradeChart(){{
+  const cats=TO_DATA.categories||{{}};
+  const total=(cats['方向错误']||0)+(cats['止损太小']||0)+(cats['止盈过早']||0)+(cats['高位止盈']||0)||1;
+  const items=[
+    {{label:'方向错误',n:cats['方向错误']||0,color:'#e74c3c'}},
+    {{label:'止损太小',n:cats['止损太小']||0,color:'#e67e22'}},
+    {{label:'止盈过早',n:cats['止盈过早']||0,color:'#f39c12'}},
+    {{label:'高位止盈',n:cats['高位止盈']||0,color:'#27ae60'}}
+  ];
+  let h='';
+  items.forEach(it=>{{
+    const pct=(it.n/total*100).toFixed(1);
+    h+=`<div class="cat-bar">
+      <span style="min-width:50px;font-size:12px">${{it.label}}</span>
+      <div style="flex:1;background:#eee;border-radius:3px;height:22px">
+        <div class="cb-fill" style="width:${{pct}}%;background:${{it.color}}"></div>
+      </div>
+      <span class="cb-num">${{it.n}}笔 (${{pct}}%)</span>
+    </div>`;
+  }});
+  document.getElementById('tradeChart').innerHTML=h;
+}}
+
+function renderTradeStop(){{
+  const opt=TO_DATA.optimization;
+  if(!opt||!opt.stop_loss_analysis){{document.getElementById('tradeStop').innerHTML='<span style="color:#999">无止损数据</span>';return;}}
+  let h='<table style="width:100%;font-size:12px;border-collapse:collapse">';
+  h+='<tr style="background:#f0f1f5;color:#666;font-weight:bold"><td style="padding:4px 8px">止损%</td><td style="padding:4px 8px">存活率</td><td style="padding:4px 8px">均利润</td></tr>';
+  opt.stop_loss_analysis.slice(0,8).forEach(s=>{{
+    const color=s.survive_rate>60?'#27ae60':s.survive_rate>30?'#e67e22':'#e74c3c';
+    h+=`<tr><td style="padding:4px 8px;font-weight:bold">${{s.stop_loss}}%</td>
+      <td style="padding:4px 8px;color:${{color}}">${{s.survived}}笔 (${{s.survive_rate}}%)</td>
+      <td style="padding:4px 8px;font-weight:bold;color:${{s.avg_max_profit>0?'#27ae60':'#e74c3c'}}">${{s.avg_max_profit>=0?'+':''}}${{s.avg_max_profit.toFixed(1)}}%</td></tr>`;
+  }});
+  h+='</table>';
+  if(opt.mae_median) h+=`<p style="font-size:11px;color:#888;margin:6px 0 0">MAE中位: ${{opt.mae_median}}% | MFE中位: ${{opt.mfe_median}}%</p>`;
+  document.getElementById('tradeStop').innerHTML=h;
+}}
+
+function renderTradeExamples(){{
+  const trades=TO_DATA.trades||[];
+  const cats={{
+    'tradeTight':trades.filter(t=>t.category==='止损太小').sort((a,b)=>(b.mae_pct||0)-(a.mae_pct||0)).slice(0,5),
+    'tradeEarly':trades.filter(t=>t.category==='止盈过早').sort((a,b)=>(b.mfe_pct-b.exit_pct)-(a.mfe_pct-a.exit_pct)).slice(0,5),
+    'tradeWrong':trades.filter(t=>t.category==='方向错误').sort((a,b)=>(b.mae_pct||0)-(a.mae_pct||0)).slice(0,5),
+    'tradePerfect':trades.filter(t=>t.category==='高位止盈').sort((a,b)=>(b.exit_pct||0)-(a.exit_pct||0)).slice(0,5)
+  }};
+  for(const[id,list] of Object.entries(cats)){{
+    if(!list.length){{document.getElementById(id).innerHTML='<span style="color:#999;font-size:12px">无</span>';continue;}}
+    let h='';
+    list.forEach(t=>{{
+      const dirColor=t.direction==='多'?'#27ae60':'#e74c3c';
+      let info;
+      if(t.category==='止损太小') info=`浮亏${{(t.mae_pct||0).toFixed(1)}}%→终亏${{Math.abs(t.exit_pct||0).toFixed(1)}}%`;
+      else if(t.category==='止盈过早') info=`实盈${{(t.exit_pct||0).toFixed(1)}}% 最大可达${{(t.mfe_pct||0).toFixed(1)}}%`;
+      else if(t.category==='方向错误') info=`MAE ${{(t.mae_pct||0).toFixed(1)}}% 终亏${{Math.abs(t.exit_pct||0).toFixed(1)}}%`;
+      else info=`实盈+${{(t.exit_pct||0).toFixed(1)}}%`;
+      h+=`<div class="trade-row">
+        <span class="trade-sym">${{t.symbol||''}}</span>
+        <span class="trade-dir" style="color:${{dirColor}};font-weight:bold">${{t.direction}}</span>
+        <span class="trade-info">${{info}}</span>
+      </div>`;
+    }});
+    document.getElementById(id).innerHTML=h;
+  }}
+}}
+
 // Init
+if(TO_DATA.trades&&TO_DATA.trades.length)initTrade();
 if(Object.keys(SCAN_DATA).length)initScan();
 if(BT_DATA.length)initBacktest();
-switchTab('scan');
+switchTab('trade');
 </script>
 </body>
 </html>'''
