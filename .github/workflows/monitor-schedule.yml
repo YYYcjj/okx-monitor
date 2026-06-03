@@ -70,6 +70,31 @@ jobs:
           if-no-files-found: warn
           overwrite: true
 
+  deploy-pages:
+    needs: scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download viewer HTML
+        uses: actions/download-artifact@v4
+        with:
+          name: viewer
+          path: pages/
+
+      - name: Deploy to gh-pages
+        run: |
+          mkdir -p /tmp/deploy
+          cp pages/viewer.html /tmp/deploy/index.html
+          cd /tmp/deploy
+          git init
+          git checkout -b gh-pages
+          git config user.name "OKX Bot"
+          git config user.email "bot@okx.local"
+          git add index.html
+          git commit -m "Deploy viewer" || true
+          git push -f https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git gh-pages
+
   refresh-symbols:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
