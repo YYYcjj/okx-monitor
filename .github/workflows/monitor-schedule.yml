@@ -60,7 +60,9 @@ jobs:
           overwrite: true
 
       - name: Generate viewer HTML
-        run: python analysis/build_viewer.py
+        run: |
+          python analysis/pairwise_winrate.py
+          python analysis/build_viewer.py
 
       - name: Upload viewer HTML
         uses: actions/upload-artifact@v4

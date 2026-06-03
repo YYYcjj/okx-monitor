@@ -57,6 +57,13 @@ def load_backtest():
 scan_data = load_scans()
 bt_data = load_backtest()
 
+# 加载组合胜率数据
+PW_FILE = os.path.join(PROJECT_ROOT, "okx_data", "pairwise_winrate.json")
+pw_data = {}
+if os.path.exists(PW_FILE):
+    with open(PW_FILE, 'r', encoding='utf-8') as f:
+        pw_data = json.load(f)
+
 HTML = f'''<!DOCTYPE html>
 <html lang="zh">
 <head>
@@ -109,6 +116,30 @@ tr.win-4h{{background:#f0fff0}}
 .section{{display:none}}
 .section.show{{display:block}}
 @media(max-width:768px){{body{{padding:10px}}h1{{font-size:17px}}}}
+/* Pairwise styles */
+.pw-container{{display:flex;gap:14px;flex-wrap:wrap}}
+.pw-left{{flex:1;min-width:280px;max-width:360px}}
+.pw-right{{flex:2;min-width:400px}}
+.pw-list{{max-height:60vh;overflow-y:auto;font-size:12px}}
+.pw-item{{display:flex;align-items:center;padding:6px 8px;border-radius:6px;margin-bottom:3px;background:#fff;gap:6px}}
+.pw-item:nth-child(odd){{background:#fafbfc}}
+.pw-rank{{width:22px;text-align:center;font-weight:bold;color:#999;font-size:11px}}
+.pw-tags{{display:flex;flex:1;gap:4px;overflow:hidden}}
+.pw-tag{{padding:2px 7px;border-radius:4px;font-size:10px;font-weight:bold;white-space:nowrap;background:#e8f4fd;color:#2980b9}}
+.pw-tag.dir{{background:#eafaf1;color:#27ae60}}
+.pw-tag.val{{background:#fef9e7;color:#e67e22}}
+.pw-bar-wrap{{width:80px;height:14px;background:#eee;border-radius:7px;overflow:hidden;flex-shrink:0}}
+.pw-bar{{height:100%;border-radius:7px;transition:width .3s}}
+.pw-num{{width:60px;text-align:right;font-weight:bold;font-size:12px;flex-shrink:0}}
+.pw-heatmap{{overflow-x:auto;overflow-y:auto;max-height:55vh;font-size:10px;margin-top:8px}}
+.pw-heatmap table{{border-collapse:collapse;width:auto}}
+.pw-heatmap th{{position:sticky;top:0;z-index:3;background:#f0f1f5;font-size:9px;padding:2px 3px;max-width:50px;overflow:hidden;text-overflow:ellipsis;writing-mode:vertical-lr;text-orientation:mixed;height:80px;vertical-align:bottom;min-width:22px}}
+.pw-heatmap td{{padding:0;text-align:center;cursor:pointer;min-width:22px;height:22px;font-size:9px}}
+.pw-heatmap td:hover{{outline:2px solid #3498db;z-index:1;position:relative}}
+.pw-heatmap .corner{{position:sticky;left:0;z-index:4;background:#f0f1f5;font-weight:bold;font-size:9px;text-align:left;padding:1px 4px;max-width:55px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.pw-legend{{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11px;color:#999}}
+.pw-grad{{width:120px;height:10px;border-radius:5px;background:linear-gradient(to right,#27ae60,#f1c40f,#e74c3c)}}
+.pw-grad-inv{{background:linear-gradient(to right,#e74c3c,#f1c40f,#27ae60)}}
 </style>
 </head>
 <body>
@@ -117,6 +148,7 @@ tr.win-4h{{background:#f0fff0}}
 
 <div class="tabs">
   <button class="tab active" onclick="switchTab('scan')">📡 实时扫描</button>
+  <button class="tab" onclick="switchTab('pairwise')">🔗 组合胜率</button>
   <button class="tab" onclick="switchTab('backtest')">🔬 回测结果</button>
 </div>
 
@@ -139,6 +171,24 @@ tr.win-4h{{background:#f0fff0}}
   <div id="scanStats" class="stats"></div>
   <div class="table-wrap"><table id="scanTable"><thead id="scanHead"></thead><tbody id="scanBody"></tbody></table></div>
   <div class="empty" id="scanEmpty">暂无实时扫描数据</div>
+</div>
+
+<!-- Pairwise Section -->
+<div class="section" id="pairwiseSection">
+  <div id="pwContainer" class="pw-container">
+    <div class="pw-left">
+      <h3 style="font-size:14px;margin-bottom:8px">🏆 Top 组合 (24H胜率, ≥10样本)</h3>
+      <div id="pwTopList" class="pw-list"></div>
+    </div>
+    <div class="pw-right">
+      <h3 style="font-size:14px;margin-bottom:8px">📊 胜率热力图</h3>
+      <div class="pw-legend">
+        <span>0%</span><div class="pw-grad"></div><span>100%</span>
+      </div>
+      <div id="pwHeatmap" class="pw-heatmap"></div>
+    </div>
+  </div>
+  <div class="empty" id="pwEmpty">暂无组合胜率数据，请运行 python analysis/pairwise_winrate.py</div>
 </div>
 
 <!-- Backtest Section -->
@@ -166,6 +216,7 @@ tr.win-4h{{background:#f0fff0}}
 <script>
 const SCAN_DATA = {json.dumps(scan_data, ensure_ascii=False)};
 const BT_DATA = {json.dumps(bt_data, ensure_ascii=False)};
+const PW_DATA = {json.dumps(pw_data, ensure_ascii=False)};
 
 let scanRows=[], btRows=[], activeScanFile='', activeTab='scan';
 let sortState={{scan:{{col:'',dir:1}},bt:{{col:'',dir:1}}}};
@@ -174,10 +225,11 @@ let filterTimers={{}};
 // ── Tab switching ──
 function switchTab(tab){{
   activeTab=tab;
-  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.textContent.includes(tab==='scan'?'实时':'回测')));
-  document.querySelectorAll('.section').forEach(s=>s.classList.toggle('show',s.id===tab+'Section'));
-  if(tab==='scan'&&!activeScanFile)initScan();
-  if(tab==='backtest'&&!btRows.length)initBacktest();
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',false));
+  document.querySelectorAll('.section').forEach(s=>s.classList.toggle('show',false));
+  if(tab==='scan'){{document.querySelector('.tabs .tab:nth-child(1)').classList.add('active');document.getElementById('scanSection').classList.add('show');if(!activeScanFile)initScan();}}
+  else if(tab==='pairwise'){{document.querySelector('.tabs .tab:nth-child(2)').classList.add('active');document.getElementById('pairwiseSection').classList.add('show');initPairwise();}}
+  else{{document.querySelector('.tabs .tab:nth-child(3)').classList.add('active');document.getElementById('backtestSection').classList.add('show');if(!btRows.length)initBacktest();}}
 }}
 
 // ── Scan init ──
@@ -361,6 +413,74 @@ function resetFilter(tab){{
   document.getElementById(prefix+'Std')&&(document.getElementById(prefix+'Std').value='');
   sortState[tab]={{col:'',dir:1}};
   doFilter(tab);
+}}
+
+// ── Pairwise Win Rate ──
+function initPairwise(){{
+  const empty=document.getElementById('pwEmpty');
+  const cont=document.getElementById('pwContainer');
+  if(!PW_DATA.top_pairs||!PW_DATA.top_pairs.length){{
+    empty.style.display='block';cont.style.display='none';return;
+  }}
+  empty.style.display='none';cont.style.display='flex';
+  renderTopPairs();
+  renderHeatmap();
+}}
+
+function renderTopPairs(){{
+  const list=document.getElementById('pwTopList');
+  const colors_4h=['#2ecc71','#27ae60','#1e8449','#f39c12','#e67e22','#e74c3c'];
+  let h='';
+  PW_DATA.top_pairs.slice(0,25).forEach((p,i)=>{{
+    const wr=p.wr||0;
+    const cl=wr>=70?'#27ae60':wr>=50?'#2980b9':wr>=40?'#e67e22':'#e74c3c';
+    const c1Dir=['DMI','EMA','SW','CCI_dir','BOLL'].some(x=>p.c1.includes(x));
+    const c1Cls=c1Dir?'dir':'val';
+    const c2Dir=['DMI','EMA','SW','CCI_dir','BOLL'].some(x=>p.c2.includes(x));
+    const c2Cls=c2Dir?'dir':'val';
+    h+=`<div class="pw-item">
+      <span class="pw-rank">${{i+1}}</span>
+      <div class="pw-tags">
+        <span class="pw-tag ${{c1Cls}}">${{p.c1}}</span>
+        <span style="color:#999;font-size:10px">+</span>
+        <span class="pw-tag ${{c2Cls}}">${{p.c2}}</span>
+      </div>
+      <div class="pw-bar-wrap"><div class="pw-bar" style="width:${{wr}}%;background:${{cl}}"></div></div>
+      <span class="pw-num" style="color:${{cl}}">${{wr}}%</span>
+      <span style="font-size:10px;color:#999;width:50px;text-align:right">${{p.total}}个</span>
+    </div>`;
+  }});
+  list.innerHTML=h;
+}}
+
+function renderHeatmap(){{
+  const hm=document.getElementById('pwHeatmap');
+  const conds=PW_DATA.conditions||[];
+  const mat=PW_DATA.matrix||[];
+  if(!conds.length){{hm.innerHTML='<span style=\"color:#999\">无数据</span>';return;}}
+  
+  // 只显示胜率差异较大的指标
+  let h='<table><thead><tr><th class="corner">指标1\\指标2</th>';
+  conds.forEach(c=>h+=`<th title="${{c}}">${{c.replace('_',' ')}}</th>`);
+  h+='</tr></thead><tbody>';
+  for(let i=0;i<conds.length;i++){{
+    h+=`<tr><td class="corner">${{conds[i].replace('_',' ')}}</td>`;
+    for(let j=0;j<conds.length;j++){{
+      const cell=mat[i]&&mat[i][j]||{{wr:0,total:0}};
+      const wr=cell.wr||0;
+      const t=cell.total||0;
+      if(i===j&&t<5){{h+='<td style="background:#f0f0f0;color:#ccc">-</td>';continue;}}
+      const r=Math.round(wr/100*255);
+      const g=Math.round((1-Math.abs(wr-50)/50)*200);
+      const b=Math.round((100-wr)/100*255);
+      const bg=wr>=50?`rgb(${{Math.round(255-r)}},${{Math.round(200+(55*(wr-50)/50))}},${{Math.round(200-r)}})`:
+                     `rgb(${{Math.round(255-(100-wr)*2)}},${{Math.round(200-(50-wr)*3)}},${{Math.round(255-b)}})`;
+      h+=`<td style="background:${{bg}};font-size:9px;color:${{wr>65||wr<35?'#fff':'#333'}}" title="${{conds[i]}}+${{conds[j]}}: ${{wr}}% (${{t}}个)">${{t>0?wr:''}}</td>`;
+    }}
+    h+='</tr>';
+  }}
+  h+='</tbody></table>';
+  hm.innerHTML=h;
 }}
 
 // Init
