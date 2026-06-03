@@ -146,6 +146,17 @@ tr.win-4h{{background:#f0fff0}}
 .pw-legend{{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11px;color:#999}}
 .pw-grad{{width:120px;height:10px;border-radius:5px;background:linear-gradient(to right,#27ae60,#f1c40f,#e74c3c)}}
 .pw-grad-inv{{background:linear-gradient(to right,#e74c3c,#f1c40f,#27ae60)}}
+/* Alert summary */
+.alert-summary{{background:#fff;border-radius:8px;padding:10px 14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);display:none}}
+.alert-summary.show{{display:block}}
+.alert-summary h3{{font-size:14px;margin:0 0 8px;color:#e74c3c}}
+.alert-cards{{display:flex;flex-wrap:wrap;gap:6px}}
+.alert-card{{padding:8px 12px;border-radius:8px;font-size:12px;background:#fff5f5;border:1px solid #fdd;flex:1 1 auto;min-width:160px;max-width:280px}}
+.alert-card.long{{background:#f0fff0;border-color:#cfc}}
+.alert-card .ac-sym{{font-weight:bold;font-size:15px;margin-bottom:3px}}
+.alert-card .ac-score{{font-size:20px;font-weight:bold}}
+.alert-card .ac-detail{{font-size:10px;color:#888;margin-top:2px}}
+.alert-card .ac-time{{font-size:10px;color:#aaa}}
 </style>
 </head>
 <body>
@@ -160,6 +171,10 @@ tr.win-4h{{background:#f0fff0}}
 
 <!-- Scan Section -->
 <div class="section show" id="scanSection">
+  <div class="alert-summary" id="alertSummary">
+    <h3>⚠️ 今日高分预警</h3>
+    <div class="alert-cards" id="alertCards"></div>
+  </div>
   <div class="file-list" id="scanFiles"></div>
   <div class="toolbar" id="scanToolbar">
     <input id="scSymbol" placeholder="币种筛选" oninput="deferFilter('scan')">
@@ -252,11 +267,48 @@ function loadScan(fn){{
   document.querySelectorAll('#scanFiles .file-chip').forEach(c=>c.classList.toggle('active',c.textContent.trim()===fn.replace('.csv','')));
   scanRows=SCAN_DATA[fn]||[];
   document.getElementById('sub').textContent='实时扫描 · '+fn.replace('.csv','')+' · '+scanRows.length+' 条';
-  if(!scanRows.length){{document.getElementById('scanEmpty').style.display='block';document.getElementById('scanTable').style.display='none';return;}}
+  if(!scanRows.length){{document.getElementById('scanEmpty').style.display='block';document.getElementById('scanTable').style.display='none';document.getElementById('alertSummary').classList.remove('show');return;}}
   document.getElementById('scanEmpty').style.display='none';
   document.getElementById('scanTable').style.display='';
+  buildAlertSummary();
   buildScanHeader(Object.keys(scanRows[0]));
   doFilter('scan');
+}}
+
+function buildAlertSummary(){{
+  const today = activeScanFile.replace('.csv','');
+  const alerts = [];
+  const seen = new Set();
+  // 取每个币种最新一次的高分预警
+  const bySym = {{}};
+  for(const r of scanRows){{
+    const bull = r.dmi_bull||0, bear = r.dmi_bear||0;
+    if(bull >= 6 || bear >= 6){{
+      const nm = (r.symbol||'').replace('-USDT-SWAP','').replace('-USDT','').replace('-SWAP','');
+      if(bull >= 6) bySym[nm+'_多'] = {{sym:nm, dir:'多', score:bull, time:r.timestamp, dmi:r.dmi_1d||'', srsi:r.srsi_4h||'', cci:r.cci_1h||''}};
+      if(bear >= 6) bySym[nm+'_空'] = {{sym:nm, dir:'空', score:bear, time:r.timestamp, dmi:r.dmi_1d||'', srsi:r.srsi_4h||'', cci:r.cci_1h||''}};
+    }}
+  }}
+  const list = Object.values(bySym).sort((a,b)=>b.score-a.score);
+  const summary = document.getElementById('alertSummary');
+  const cards = document.getElementById('alertCards');
+  if(!list.length){{summary.classList.remove('show');return;}}
+  summary.classList.add('show');
+  cards.innerHTML = list.map(a=>{{
+    const cl = a.dir==='多'?'long':'';
+    const sc = a.dir==='多'?'#27ae60':'#e74c3c';
+    const emoji = a.dir==='多'?'🟢':'🔴';
+    const extra = [];
+    if(a.dmi) extra.push('D1D:'+a.dmi);
+    if(a.srsi!==null&&a.srsi!==undefined) extra.push('S4H:'+(typeof a.srsi==='number'?a.srsi.toFixed(1):a.srsi));
+    if(a.cci!==null&&a.cci!==undefined) extra.push('C1H:'+(typeof a.cci==='number'?Math.round(a.cci):a.cci));
+    return `<div class="alert-card ${{cl}}">
+      <div class="ac-sym">${{emoji}} ${{a.sym}}</div>
+      <div class="ac-score" style="color:${{sc}}">${{a.score}}分</div>
+      <div class="ac-detail">${{extra.join(' · ')}}</div>
+      <div class="ac-time">${{a.time||''}}</div>
+    </div>`;
+  }}).join('');
 }}
 
 function buildScanHeader(cols){{
