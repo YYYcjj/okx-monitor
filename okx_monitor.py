@@ -282,14 +282,21 @@ def trend_cci(candles):
 
 # ── 配置 ──
 SYMBOLS = [
-    "APT-USDT", "HOME-USDT-SWAP", "WLD-USDT-SWAP", "BTC-USDT",
-    "HUMA-USDT", "HMSTR-USDT", "PUMP-USDT", "ORDI-USDT"
+    "APT-USDT-SWAP", "HOME-USDT-SWAP", "WLD-USDT-SWAP", "BTC-USDT-SWAP",
+    "HUMA-USDT-SWAP", "HMSTR-USDT-SWAP", "PUMP-USDT-SWAP", "ORDI-USDT-SWAP"
 ]
 ALERT_THRESHOLD = 6
 
 # ── 项目根目录 ──
-
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# 动态品种列表: 优先读取 SYMBOLS.txt（由 tools/pair_scanner.py 每天生成）
+DYNAMIC_FILE = os.path.join(PROJECT_ROOT, "SYMBOLS.txt")
+if os.path.exists(DYNAMIC_FILE):
+    with open(DYNAMIC_FILE) as f:
+        dynamic = [l.strip() for l in f if l.strip() and not l.startswith('#')]
+    if dynamic:
+        SYMBOLS = dynamic
 
 # ── 通知渠道 ──
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "").strip()

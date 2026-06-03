@@ -56,3 +56,23 @@ jobs:
           path: okx_data/viewer.html
           if-no-files-found: warn
           overwrite: true
+
+  # 每日更新热门品种列表 (UTC 23:00 = CST 7:00)
+  refresh-symbols:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests urllib3 --quiet
+      - run: python tools/pair_scanner.py
+      - name: Commit updated SYMBOLS.txt
+        run: |
+          git config user.name "OKX Bot"
+          git config user.email "bot@okx.local"
+          git add SYMBOLS.txt
+          git diff --staged --quiet || git commit -m "[auto] 每日热门品种更新" && git push
