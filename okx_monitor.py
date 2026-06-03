@@ -393,6 +393,39 @@ def save_cooldown():
     with open(cooldown_file, "w") as f:
         f.write(str(time.time()))
 
+def per_symbol_cooldown_ok(symbol, direction):
+    """同币种+同方向2小时内不重复推送"""
+    cooldown_file = os.path.join(PROJECT_ROOT, "okx_data", ".symbol_cooldown.json")
+    cooldowns = {}
+    if os.path.exists(cooldown_file):
+        try:
+            with open(cooldown_file) as f:
+                cooldowns = json.load(f)
+        except:
+            pass
+    key = f"{symbol}_{direction}"
+    if key in cooldowns:
+        if time.time() - cooldowns[key] < 7200:
+            return False
+    return True
+
+def save_symbol_cooldown(symbol, direction):
+    """记录币种+方向冷却"""
+    cooldown_file = os.path.join(PROJECT_ROOT, "okx_data", ".symbol_cooldown.json")
+    cooldowns = {}
+    if os.path.exists(cooldown_file):
+        try:
+            with open(cooldown_file) as f:
+                cooldowns = json.load(f)
+        except:
+            pass
+    # 清理过期
+    now = time.time()
+    cooldowns = {k: v for k, v in cooldowns.items() if now - v < 7200}
+    cooldowns[f"{symbol}_{direction}"] = now
+    with open(cooldown_file, "w") as f:
+        json.dump(cooldowns, f)
+
 def is_daytime(now):
     return 7 <= now.hour <= 23
 
@@ -682,13 +715,24 @@ def main():
         pushed = send_report(results, now_str)
         if pushed:
             save_cooldown()
-    elif alerts and can_push:
-        print(f"\n📤 高分预警，推送简报...")
-        pushed = send_high_alert(alerts, now_str)
-        if pushed:
-            save_cooldown()
+    elif alerts:
+        # 逐币种检查冷却，过滤已推送的
+        new_alerts = []
+        for a in alerts:
+            if per_symbol_cooldown_ok(a["symbol"], a["type"]):
+                new_alerts.append(a)
+            else:
+                name = a["symbol"].replace("-SWAP","").replace("-USDT","")
+                print(f"  ⏳ {name} {a['type']} 冷却中，跳过")
+        if new_alerts and can_push:
+            print(f"\n📤 高分预警，推送简报 ({len(new_alerts)}/{len(alerts)}个)...")
+            pushed = send_high_alert(new_alerts, now_str)
+            if pushed:
+                save_cooldown()
+                for a in new_alerts:
+                    save_symbol_cooldown(a["symbol"], a["type"])
     else:
-        reason = "夜间/非整点" if not is_full_push else ("冷却中(2h)" if not can_push and alerts else "无预警")
+        reason = "夜间/非整点" if not is_full_push else "无预警"
         print(f"\n📄 仅记录CSV ({reason})")
     
     log_file = os.path.join(PROJECT_ROOT, "monitor_log.txt")

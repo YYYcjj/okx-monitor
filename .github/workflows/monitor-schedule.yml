@@ -55,7 +55,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cooldown-state
-          path: okx_data/.last_push
+          path: |
+            okx_data/.last_push
+            okx_data/.symbol_cooldown.json
           if-no-files-found: warn
           overwrite: true
 
