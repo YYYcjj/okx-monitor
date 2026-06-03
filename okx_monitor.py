@@ -345,9 +345,29 @@ def fmt_csv(v):
     return f"{v:.1f}" if isinstance(v, float) else str(v)
 
 # ── 时间判断 ──
+GITHUB_EVENT = os.environ.get("GITHUB_EVENT_NAME", "")
+
 def should_push_full(now):
+    """日间整点±8分钟 + 非push事件 → 推送完整报表"""
     h, m = now.hour, now.minute
-    return 7 <= h <= 23 and m <= 5
+    is_hourly = 7 <= h <= 23 and m <= 8
+    is_schedule = GITHUB_EVENT in ("schedule", "workflow_dispatch", "")
+    return is_hourly and is_schedule
+
+def push_cooldown_ok():
+    """避免30分钟内重复推送"""
+    cooldown_file = os.path.join(PROJECT_ROOT, ".last_push")
+    if os.path.exists(cooldown_file):
+        try:
+            with open(cooldown_file) as f:
+                last = float(f.read().strip())
+            if time.time() - last < 1800:  # 30分钟
+                return False
+        except:
+            pass
+    with open(cooldown_file, "w") as f:
+        f.write(str(time.time()))
+    return True
 
 def is_daytime(now):
     return 7 <= now.hour <= 23
@@ -598,14 +618,15 @@ def main():
         print(f"{name:<10} {dmi_s:>8} {adx_s:>8} {sw_s:>8}")
     
     pushed = False
-    if is_full_push:
+    can_push = push_cooldown_ok()
+    if is_full_push and can_push:
         print(f"\n📤 日间整点，推送完整报表...")
         pushed = send_report(results, now_str)
-    elif alerts:
+    elif alerts and can_push:
         print(f"\n📤 高分预警，推送简报...")
         pushed = send_high_alert(alerts, now_str)
     else:
-        print(f"\n📄 仅记录CSV (夜间无高分)")
+        print(f"\n📄 仅记录CSV (夜间/非整点/冷却中)")
     
     log_file = os.path.join(PROJECT_ROOT, "monitor_log.txt")
     status = "FULL" if is_full_push else ("ALERT" if alerts else "CSV")
