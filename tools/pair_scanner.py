@@ -13,6 +13,8 @@ HEADERS = {'User-Agent': 'Mozilla/5.0'}
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR) if 'tools' in SCRIPT_DIR else SCRIPT_DIR
 OUTPUT = os.path.join(PROJECT_ROOT, "SYMBOLS.txt")
+FIXED_FILE = os.path.join(PROJECT_ROOT, "FIXED_SYMBOLS.txt")
+HISTORY_FILE = os.path.join(os.path.dirname(SCRIPT_DIR) if 'tools' in SCRIPT_DIR else SCRIPT_DIR, "tools", "scan_history.json")
 
 def fetch_top_pairs(limit=30):
     """获取成交量前N的USDT永续合约"""
@@ -111,7 +113,7 @@ def main():
         name = r['name']
         print(f"{name:<10} {r['atr_pct']:>5.1f}% {r['wick_pct']:>5.1f}% {r['trend']:>4.2f} {r['momentum']:>+5.1f}% {r['score']:>5.1f}")
     
-    # 取前15个 + 必选的BTC
+    # 取前15个
     selected = [r['symbol'] for r in results[:15]]
     
     # 确保BTC在列表中
@@ -119,12 +121,57 @@ def main():
     if btc_swap not in selected:
         selected.insert(0, btc_swap)
     
-    # 写入文件
-    with open(OUTPUT, 'w') as f:
-        f.write('\n'.join(selected) + '\n')
+    # ── 连续3天跟踪 ──
+    today = time.strftime("%Y-%m-%d")
+    history = {}
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE) as f:
+            history = json.load(f)
     
-    print(f"\n✅ 已选出 {len(selected)} 个品种 → {OUTPUT}")
-    print(f"   {' '.join(s.replace('-USDT-SWAP','') for s in selected)}")
+    # 记录今天
+    history[today] = selected
+    # 只保留最近7天
+    history = {k: v for k, v in sorted(history.items())[-7:]}
+    with open(HISTORY_FILE, 'w') as f:
+        json.dump(history, f, indent=2)
+    
+    # 检查连续3天上榜 → 加入固定清单
+    dates = sorted(history.keys())
+    if len(dates) >= 3:
+        last3 = dates[-3:]
+        consec = set(history[last3[0]])
+        for d in last3[1:]:
+            consec &= set(history[d])
+        
+        fixed = set()
+        if os.path.exists(FIXED_FILE):
+            with open(FIXED_FILE) as f:
+                fixed = set(l.strip() for l in f if l.strip())
+        
+        new_fixed = consec - fixed
+        if new_fixed:
+            fixed |= new_fixed
+            with open(FIXED_FILE, 'w') as f:
+                f.write('\n'.join(sorted(fixed)) + '\n')
+            print(f"\n⭐ 新固定清单: {' '.join(s.replace('-USDT-SWAP','') for s in new_fixed)}")
+    
+    # ── 合并: 固定清单优先，然后是今日筛选 ──
+    fixed_list = []
+    if os.path.exists(FIXED_FILE):
+        with open(FIXED_FILE) as f:
+            fixed_list = [l.strip() for l in f if l.strip()]
+    
+    final = fixed_list + [s for s in selected if s not in fixed_list]
+    
+    # 写入 SYMBOLS.txt（固定优先，动态补充，总数≤25）
+    with open(OUTPUT, 'w') as f:
+        f.write('\n'.join(final[:25]) + '\n')
+    
+    print(f"\n✅ 共 {len(final[:25])} 个品种 → {OUTPUT}")
+    fixed_names = [s.replace('-USDT-SWAP','') for s in fixed_list]
+    dyn_names = [s.replace('-USDT-SWAP','') for s in selected if s not in fixed_list]
+    print(f"   固定({len(fixed_list)}): {' '.join(fixed_names[:10])}{'...' if len(fixed_list)>10 else ''}")
+    print(f"   动态({len(final[:25])-len(fixed_list)}): {' '.join(dyn_names[:10])}{'...' if len(selected)>10 else ''}")
 
 if __name__ == '__main__':
     main()

@@ -19,3 +19,4 @@ github_key.pub
 .wecom_webhook
 .serverchan_key
 .last_push
+tools/scan_history.json
