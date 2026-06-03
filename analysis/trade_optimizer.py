@@ -199,6 +199,99 @@ def analyze_trade_prices(trade):
         "bars": len(post_candles)
     }
 
+def classify_trade(analysis, trade):
+    """分类交易: 方向错误/止损太小/止盈过早/高位止盈"""
+    direction = trade["direction"]
+    mae = analysis["mae_pct"]
+    mfe = analysis["mfe_pct"]
+    exit_pct = analysis["exit_pct"]
+    pnl = trade["pnl"]
+    
+    is_loss = pnl < -0.01
+    is_profit = pnl > 0.01
+    
+    # 获取出场后24H走势判断是否错过
+    sym = trade["symbol"] + "-USDT-SWAP"
+    exit_dt = parse_dt(trade.get("exit_time", ""))
+    if exit_dt:
+        exit_ts = int(exit_dt * 1000)
+        url = f"{OKX_BASE}/api/v5/market/candles"
+        params = {"instId": sym, "bar": "1H", "limit": "50"}
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+            data = resp.json().get("data", [])
+            post_exit_prices = []
+            for c in data:
+                ts = int(c[0]) / 1000
+                if ts > exit_dt.timestamp():
+                    post_exit_prices.append(float(c[4]))  # close
+            post_exit_prices.reverse()
+        except:
+            post_exit_prices = []
+    else:
+        post_exit_prices = []
+    
+    # ── 分类逻辑 ──
+    if is_loss:
+        # 亏损交易
+        recovery = mae - abs(exit_pct)  # 浮亏峰值与终亏的差距
+        
+        if recovery < 3:
+            # 最终亏损接近浮亏峰值 → 方向一路错到底
+            cat = "方向错误"
+            detail = f"MAE={mae}%≈终亏{abs(exit_pct)}%, 从未反弹"
+        elif recovery >= 3 and mae <= 15:
+            # 浮亏比终亏大不少 → 止损在反弹前
+            cat = "止损太小"
+            detail = f"浮亏{mae}%→终仅亏{abs(exit_pct)}%, 反弹{recovery:.0f}%"
+        elif recovery >= 3 and mae > 15:
+            cat = "方向错误"
+            detail = f"深度浮亏{mae}%, 终亏{abs(exit_pct)}%"
+        else:
+            cat = "止损太小"
+            detail = f"MAE={mae}% 终亏{abs(exit_pct)}%"
+    else:
+        # 盈利交易
+        if mfe - exit_pct > 15:
+            # 曾浮盈远超最终 → 止盈过早
+            cat = "止盈过早"
+            detail = f"曾浮盈{mfe}% 实盈仅{exit_pct}%, 错过{mfe-exit_pct:.0f}%"
+        elif exit_pct > 0 and mfe - exit_pct < 5:
+            # 最终收益接近最大浮盈 → 高位止盈
+            cat = "高位止盈"
+            detail = f"实盈{exit_pct}% 接近最大{mfe}%"
+        elif mfe - exit_pct > 5:
+            cat = "止盈过早"
+            detail = f"实盈{exit_pct}% 最大可达{mfe}%, 差{mfe-exit_pct:.0f}%"
+        else:
+            cat = "高位止盈"
+            detail = f"实盈{exit_pct}%"
+    
+    # 补充: 检查出场后涨幅
+    missed_pct = 0
+    if post_exit_prices and len(post_exit_prices) >= 4:
+        exit_px = trade["exit"]
+        if direction == "多":
+            post_high = max(post_exit_prices[:24])  # 后24H最高
+            missed_pct = round((post_high - exit_px) / exit_px * 100, 1)
+        else:
+            post_low = min(post_exit_prices[:24])
+            missed_pct = round((exit_px - post_low) / exit_px * 100, 1)
+        if missed_pct > 5:
+            if is_profit:
+                cat = "止盈过早"
+            detail += f" 出场后+{missed_pct}%"
+    
+    return {
+        "category": cat,
+        "detail": detail,
+        "missed_after_exit": missed_pct,
+        "mae": mae,
+        "mfe": mfe,
+        "exit_pct": exit_pct,
+        "pnl": pnl
+    }
+
 def find_optimal_stops(results):
     """在回撤≤34%约束下找最大利润位"""
     valid = [r for r in results if r and r["mae_pct"] < 34]
@@ -315,6 +408,11 @@ def main():
             r["entry"] = t["entry"]
             r["exit"] = t["exit"]
             r["pnl"] = t["pnl"]
+            # 分类
+            cls = classify_trade(r, t)
+            r["category"] = cls["category"]
+            r["detail"] = cls["detail"]
+            r["missed_after_exit"] = cls["missed_after_exit"]
             results.append(r)
         
         if (i+1) % 15 == 0:
@@ -349,9 +447,43 @@ def main():
             if dir_opt:
                 print(f"\n📌 {dir_label}头 ({len(dir_results)}笔): 止损{dir_opt['best']['stop_loss']}% 存活{dir_opt['best']['survive_rate']}% 均利润{dir_opt['best']['avg_max_profit']:+.2f}%")
     
+    # 交易分类汇总
+    cats = {}
+    for r in results:
+        c = r.get("category", "未分类")
+        cats[c] = cats.get(c, 0) + 1
+    
+    print(f"\n{'='*60}")
+    print(f"📋 交易分类 ({len(results)} 笔)")
+    print(f"{'='*60}")
+    for cat in ["方向错误", "止损太小", "止盈过早", "高位止盈"]:
+        n = cats.get(cat, 0)
+        pct = n / len(results) * 100
+        bar = "█" * int(pct / 3)
+        print(f"  {cat:<8}: {n:>3}笔 ({pct:>5.1f}%) {bar}")
+    
+    # 典型示例
+    print(f"\n📌 典型止损太小 (止损后大涨):")
+    too_tight = sorted([r for r in results if r.get("category") == "止损太小"], 
+                       key=lambda r: r.get("missed_after_exit", 0), reverse=True)[:5]
+    for r in too_tight:
+        print(f"  {r['symbol']:<8} {r['direction']} 入{r['entry']} 出{r['exit']} → 浮亏{r.get('mae_pct','?')}%后反弹, 出场后+{r.get('missed_after_exit',0)}%")
+    
+    print(f"\n📌 典型止盈过早:")
+    early_exit = sorted([r for r in results if r.get("category") == "止盈过早"],
+                        key=lambda r: r.get("missed_after_exit", 0), reverse=True)[:5]
+    for r in early_exit:
+        print(f"  {r['symbol']:<8} {r['direction']} 入{r['entry']} 出{r['exit']} → 实盈{r.get('exit_pct','?')}%, 最大可达{r.get('mfe_pct','?')}%")
+    
+    print(f"\n📌 典型高位止盈 (精准):")
+    perfect = sorted([r for r in results if r.get("category") == "高位止盈"],
+                     key=lambda r: abs(r.get("exit_pct", 0)), reverse=True)[:5]
+    for r in perfect:
+        print(f"  {r['symbol']:<8} {r['direction']} 入{r['entry']} 出{r['exit']} → 实盈+{r.get('exit_pct','?')}%, 接近峰顶")
+
     # 保存
     with open(OUTPUT, "w") as f:
-        json.dump({"trades": results, "optimization": opt}, f, ensure_ascii=False, indent=2)
+        json.dump({"trades": results, "optimization": opt, "categories": cats}, f, ensure_ascii=False, indent=2)
     print(f"\n✅ {OUTPUT}")
 
 if __name__ == "__main__":
