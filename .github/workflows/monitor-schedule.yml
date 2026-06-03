@@ -63,6 +63,7 @@ jobs:
 
       - name: Generate viewer HTML
         run: |
+          python analysis/entry_exit_analysis.py
           python analysis/pairwise_winrate.py
           python analysis/build_viewer.py
 

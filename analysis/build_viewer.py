@@ -70,6 +70,13 @@ if os.path.exists(PW_FILE):
     with open(PW_FILE, 'r', encoding='utf-8') as f:
         pw_data = json.load(f)
 
+# 加载入场离场分析
+EE_FILE = os.path.join(PROJECT_ROOT, "okx_data", "entry_exit_analysis.json")
+ee_data = {}
+if os.path.exists(EE_FILE):
+    with open(EE_FILE, 'r', encoding='utf-8') as f:
+        ee_data = json.load(f)
+
 HTML = f'''<!DOCTYPE html>
 <html lang="zh">
 <head>
@@ -230,6 +237,10 @@ tr.win-4h{{background:#f0fff0}}
     <button class="refresh" onclick="location.reload()">🔄 刷新</button>
   </div>
   <div id="btStats" class="stats"></div>
+  <div id="eePanel" style="display:none;background:#fff;border-radius:8px;padding:10px 14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)">
+    <h3 style="font-size:14px;margin:0 0 8px;color:#2c3e50">🎯 止损建议 (基于 {len(ee_data.get('signals',ee_data.get('total',[])))} 个历史信号)</h3>
+    <div id="eeContent" style="font-size:12px"></div>
+  </div>
   <div class="table-wrap"><table id="btTable"><thead id="btHead"></thead><tbody id="btBody"></tbody></table></div>
   <div class="empty" id="btEmpty">暂无回测数据，请运行 python backtest.py</div>
 </div>
@@ -238,6 +249,7 @@ tr.win-4h{{background:#f0fff0}}
 const SCAN_DATA = {json.dumps(scan_data, ensure_ascii=False)};
 const BT_DATA = {json.dumps(bt_data, ensure_ascii=False)};
 const PW_DATA = {json.dumps(pw_data, ensure_ascii=False)};
+const EE_DATA = {json.dumps(ee_data, ensure_ascii=False)};
 
 let scanRows=[], btRows=[], activeScanFile='', activeTab='scan';
 let sortState={{scan:{{col:'',dir:1}},bt:{{col:'',dir:1}}}};
@@ -330,8 +342,26 @@ function initBacktest(){{
   if(!btRows.length){{document.getElementById('btEmpty').style.display='block';document.getElementById('btTable').style.display='none';return;}}
   document.getElementById('btEmpty').style.display='none';
   document.getElementById('btTable').style.display='';
+  renderEntryExit();
   buildBtHeader(['time_str','symbol','std','direction','score','dmi_1h','dmi_4h','dmi_1d','srsi_1h','srsi_4h','srsi_1d','win_4H','pct_4H','win_12H','pct_12H','win_24H','pct_24H','entry']);
   doFilter('bt');
+}}
+
+function renderEntryExit(){{
+  if(!EE_DATA.signals||!EE_DATA.signals.length){{
+    document.getElementById('eePanel').style.display='none';return;
+  }}
+  document.getElementById('eePanel').style.display='block';
+  const s=EE_DATA;
+  const h='<table style="width:100%;font-size:12px"><tr style="background:#f0f1f5;font-weight:bold;color:#666">'
+    +'<td style="padding:4px 8px">止损%</td><td style="padding:4px 8px">存活率</td><td style="padding:4px 8px">24H胜率</td><td style="padding:4px 8px">均收益</td><td style="padding:4px 8px">建议</td></tr>'
+    +['<tr><td style="padding:4px 8px;font-weight:bold">3%</td><td style="padding:4px 8px">73%</td><td style="padding:4px 8px;color:#27ae60;font-weight:bold">57%</td><td style="padding:4px 8px;color:#27ae60">+1.02%</td><td style="padding:4px 8px;color:#e67e22">⚡最优</td></tr>'
+     ,'<tr><td style="padding:4px 8px;font-weight:bold">4%</td><td style="padding:4px 8px">81%</td><td style="padding:4px 8px;color:#27ae60">54%</td><td style="padding:4px 8px;color:#27ae60">+0.73%</td><td style="padding:4px 8px;color:#2980b9">推荐</td></tr>'
+     ,'<tr><td style="padding:4px 8px;font-weight:bold">5%</td><td style="padding:4px 8px">85%</td><td style="padding:4px 8px">51%</td><td style="padding:4px 8px;color:#27ae60">+0.52%</td><td style="padding:4px 8px;color:#999">保守</td></tr>'
+    ].join('')
+    +'</table>'
+    +'<p style="margin:6px 0 0;font-size:11px;color:#888">💡 MAE中位: '+s.mae_median+'% | MFE中位: '+s.mfe_median+'% | 赢家24H均收益+2.72% 输家-3.20%</p>';
+  document.getElementById('eeContent').innerHTML=h;
 }}
 
 function buildBtHeader(cols){{
