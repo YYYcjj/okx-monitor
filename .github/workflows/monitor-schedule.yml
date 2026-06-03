@@ -31,6 +31,13 @@ jobs:
           path: okx_data/scans/
         continue-on-error: true
 
+      - name: Download cooldown state
+        uses: actions/download-artifact@v4
+        with:
+          name: cooldown-state
+          path: okx_data/
+        continue-on-error: true
+
       - name: Run monitor
         run: python okx_monitor.py
         env:
@@ -41,6 +48,14 @@ jobs:
         with:
           name: scan-data-${{ steps.date.outputs.date }}
           path: okx_data/scans/${{ steps.date.outputs.date }}.csv
+          if-no-files-found: warn
+          overwrite: true
+
+      - name: Upload cooldown state
+        uses: actions/upload-artifact@v4
+        with:
+          name: cooldown-state
+          path: okx_data/.last_push
           if-no-files-found: warn
           overwrite: true
 

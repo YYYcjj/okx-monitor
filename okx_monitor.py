@@ -362,19 +362,23 @@ def should_push_full(now):
     return is_hourly and is_schedule
 
 def push_cooldown_ok():
-    """避免30分钟内重复推送"""
-    cooldown_file = os.path.join(PROJECT_ROOT, ".last_push")
+    """全局冷却: 任意推送后2小时内不重复（持久化到 okx_data/ 以支持 Actions artifact）"""
+    cooldown_file = os.path.join(PROJECT_ROOT, "okx_data", ".last_push")
     if os.path.exists(cooldown_file):
         try:
             with open(cooldown_file) as f:
                 last = float(f.read().strip())
-            if time.time() - last < 1800:  # 30分钟
+            if time.time() - last < 7200:  # 2小时
                 return False
         except:
             pass
+    return True
+
+def save_cooldown():
+    """推送成功后记录时间戳"""
+    cooldown_file = os.path.join(PROJECT_ROOT, "okx_data", ".last_push")
     with open(cooldown_file, "w") as f:
         f.write(str(time.time()))
-    return True
 
 def is_daytime(now):
     return 7 <= now.hour <= 23
@@ -632,11 +636,16 @@ def main():
     if is_full_push and can_push:
         print(f"\n📤 日间整点，推送完整报表...")
         pushed = send_report(results, now_str)
+        if pushed:
+            save_cooldown()
     elif alerts and can_push:
         print(f"\n📤 高分预警，推送简报...")
         pushed = send_high_alert(alerts, now_str)
+        if pushed:
+            save_cooldown()
     else:
-        print(f"\n📄 仅记录CSV (夜间/非整点/冷却中)")
+        reason = "夜间/非整点" if not is_full_push else ("冷却中(2h)" if not can_push and alerts else "无预警")
+        print(f"\n📄 仅记录CSV ({reason})")
     
     log_file = os.path.join(PROJECT_ROOT, "monitor_log.txt")
     status = "FULL" if is_full_push else ("ALERT" if alerts else "CSV")
