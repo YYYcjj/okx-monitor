@@ -45,10 +45,10 @@ jobs:
           path: okx_data/
         continue-on-error: true
 
-      - name: Run monitor (CSV only, no push)
+      - name: Run monitor (appends to CSV)
         run: python okx_monitor.py
         env:
-          PUSHPLUS_TOKEN: ''
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
 
       - name: Upload cumulative CSV
         uses: actions/upload-artifact@v4
