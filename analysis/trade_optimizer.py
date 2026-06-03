@@ -134,7 +134,7 @@ def group_trades(orders):
 def analyze_trade_prices(trade):
     """获取交易期间K线，计算最佳止盈止损位"""
     sym = trade["symbol"] + "-USDT-SWAP"
-    entry_ts = int(trade["entry_time"]) / 1000
+    entry_ts = trade.get("entry_ts_ms", 0) / 1000
     entry_px = trade["entry"]
     direction = trade["direction"]
     
@@ -235,40 +235,79 @@ def find_optimal_stops(results):
         "best": best
     }
 
+def load_trades_from_csv(csv_path):
+    """从OKX持仓历史CSV加载交易"""
+    trades = []
+    with open(csv_path, 'r', encoding='utf-8-sig') as f:
+        # 跳过头两行元数据
+        next(f)
+        header = next(f).replace('\ufeff', '')
+        fieldnames = [h.strip().replace('\ufeff', '') for h in header.split(',')]
+        reader = csv.DictReader(f, fieldnames=fieldnames)
+        for row in reader:
+            try:
+                direction = row.get('持仓方向', '').strip()
+                if direction == '做多': direction = '多'
+                elif direction == '做空': direction = '空'
+                else: continue
+                
+                symbol = (row.get('交易产品', '') or '').replace('-SWAP', '').replace('-USDT', '')
+                entry_time = (row.get('仓位创建时间', '') or '').strip().replace('\ufeff', '')
+                
+                trades.append({
+                    "symbol": symbol,
+                    "direction": direction,
+                    "entry": float(row.get('开仓均价', 0)),
+                    "exit": float(row.get('平仓均价', 0)),
+                    "pnl": float(row.get('收益额', 0)),
+                    "fee": float(row.get('累计手续费', 0)),
+                    "entry_time": entry_time,
+                    "exit_time": (row.get('仓位更新时间', '') or '').strip(),
+                    "lever": row.get('杠杆倍数', '2'),
+                })
+            except (ValueError, KeyError):
+                continue
+    return trades
+
+def parse_dt(dt_str):
+    """解析 '2026-05-30 13:31:01' 为timestamp"""
+    try:
+        return datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone(timedelta(hours=8))).timestamp()
+    except:
+        return None
+
 def main():
     print("📊 项目4: 交易订单优化分析\n")
     
-    # 尝试从OKX获取
-    print("🔌 连接OKX API...")
-    orders = get_filled_orders()
-    
-    if not orders:
-        print("⚠️ 无法获取订单数据，请确认API权限包含交易历史")
-        # 尝试从本地文件
-        local = os.path.join(PROJECT_ROOT, "okx_data", "trades.csv")
-        if os.path.exists(local):
-            print(f"📂 使用本地文件: {local}")
-            orders = []
-            with open(local, encoding='utf-8-sig') as f:
-                for row in csv.DictReader(f):
-                    orders.append(row)
+    # 优先用本地CSV
+    local = os.path.join(PROJECT_ROOT, "okx_data", "trades.csv")
+    if os.path.exists(local):
+        print(f"📂 使用本地: {os.path.basename(local)}")
+        trades = load_trades_from_csv(local)
+    else:
+        print("🔌 连接OKX API...")
+        orders = get_filled_orders()
+        if orders:
+            trades = group_trades(orders)
         else:
-            print("📂 也未找到本地trades.csv")
-            print("\n💡 请: 1) 检查OKX API权限 2) 或将交易CSV放到 okx_data/trades.csv")
+            print("⚠️ 无数据")
             return
     
-    # 配对成完整交易
-    trades = group_trades(orders)
-    print(f"\n📋 完整交易: {len(trades)} 笔")
-    
+    print(f"📋 完整交易: {len(trades)} 笔")
     if not trades:
-        print("⚠️ 无法配对交易")
         return
     
     # 逐笔分析
     print("📈 逐笔分析价格走势...")
     results = []
+    total = len(trades)
     for i, t in enumerate(trades):
+        # 转换时间为毫秒戳供 analyze_trade_prices 使用
+        et = parse_dt(t.get("entry_time", ""))
+        if not et:
+            continue
+        t["entry_ts_ms"] = int(et * 1000)
+        
         r = analyze_trade_prices(t)
         if r:
             r["symbol"] = t["symbol"]
@@ -277,9 +316,10 @@ def main():
             r["exit"] = t["exit"]
             r["pnl"] = t["pnl"]
             results.append(r)
-        if (i+1) % 10 == 0:
-            print(f"  {i+1}/{len(trades)}...")
-        time.sleep(0.15)
+        
+        if (i+1) % 15 == 0:
+            print(f"  {i+1}/{total} ({len(results)}有效)...")
+        time.sleep(0.12)
     
     if not results:
         print("⚠️ 无有效K线数据")
@@ -294,12 +334,20 @@ def main():
     print(f"📊 交易优化结果 ({opt['total_trades']} 笔, MAE<34%)")
     print(f"{'='*60}")
     print(f"  MAE中位: {opt['mae_median']}% | MFE中位: {opt['mfe_median']}%")
-    print(f"\n🎯 止损分析 (回撤<34%的交易):")
+    print(f"\n🎯 止损分析 (回撤<34%):")
     print(f"  {'止损%':>6} {'存活':>5} {'存活率':>7} {'平均最大利润':>10}")
     for s in opt["stop_loss_analysis"]:
         print(f"  {s['stop_loss']:>6}% {s['survived']:>5} {s['survive_rate']:>6}% {s['avg_max_profit']:>+9}%")
     
     print(f"\n🏆 推荐: 止损{opt['best']['stop_loss']}% 存活率{opt['best']['survive_rate']}% 平均最大利润{opt['best']['avg_max_profit']:+.2f}%")
+    
+    # 按方向分析
+    for dir_label in ['多', '空']:
+        dir_results = [r for r in results if r.get("direction") == dir_label]
+        if dir_results:
+            dir_opt = find_optimal_stops(dir_results)
+            if dir_opt:
+                print(f"\n📌 {dir_label}头 ({len(dir_results)}笔): 止损{dir_opt['best']['stop_loss']}% 存活{dir_opt['best']['survive_rate']}% 均利润{dir_opt['best']['avg_max_profit']:+.2f}%")
     
     # 保存
     with open(OUTPUT, "w") as f:
