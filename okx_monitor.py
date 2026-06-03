@@ -331,18 +331,31 @@ def save_scan_csv(results, now):
                 'sw_1h', 'sw_4h', 'sw_1d',
                 'adx_1h', 'adx_4h', 'adx_1d',
                 'srsi_1h', 'srsi_4h', 'srsi_1d',
+                'ema_1h', 'ema_4h', 'ema_1d',
+                'cci_1h', 'cci_4h', 'cci_1d',
+                'bbp_1h', 'bbp_4h', 'bbp_1d',
+                'boll_1h', 'boll_4h', 'boll_1d',
                 'dmi_bull', 'dmi_bear', 'adx_bull', 'adx_bear', 'sw_bull', 'sw_bear'
             ])
         for r in results:
             if "_error" in r:
                 continue
             sw = r.get("trends_sw", {})
+            em = r.get("emas", {})
+            cc = r.get("ccis", {})
+            cd = r.get("cci_dirs", {})
+            bb = r.get("bbps", {})
+            bl = r.get("bolls", {})
             writer.writerow([
                 ts, r['symbol'],
                 r['trends'].get('1H', 'N/A'), r['trends'].get('4H', 'N/A'), r['trends'].get('1D', 'N/A'),
                 sw.get('1H', 'N/A'), sw.get('4H', 'N/A'), sw.get('1D', 'N/A'),
                 fmt_csv(r['adxs'].get('1H')), fmt_csv(r['adxs'].get('4H')), fmt_csv(r['adxs'].get('1D')),
                 fmt_csv(r['srsis'].get('1H')), fmt_csv(r['srsis'].get('4H')), fmt_csv(r['srsis'].get('1D')),
+                em.get('1H', 'N/A'), em.get('4H', 'N/A'), em.get('1D', 'N/A'),
+                fmt_csv(cc.get('1H')), fmt_csv(cc.get('4H')), fmt_csv(cc.get('1D')),
+                fmt_csv(bb.get('1H')), fmt_csv(bb.get('4H')), fmt_csv(bb.get('1D')),
+                bl.get('1H', 'N/A'), bl.get('4H', 'N/A'), bl.get('1D', 'N/A'),
                 r['bull'], r['bear'], r['bull_adx'], r['bear_adx'], r['bull_sw'], r['bear_sw']
             ])
     print(f"  📄 CSV已记录 → {csv_file}")
@@ -429,18 +442,23 @@ def _send_pushplus_full(results, now_str):
             if r.get("bear",0) >= ALERT_THRESHOLD: htm += f'<p style="margin:2px 0;font-size:14px">🔴 <b>{nm}</b> 空分={r["bear"]}</p>'
         htm += '<hr style="border:0;border-top:1px solid #eee;margin:8px 0">'
     htm += '<table style="width:100%;border-collapse:collapse;font-size:12px">'
-    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666"><td style="padding:5px 3px">币种</td><td style="padding:5px 1px;text-align:center">1H</td><td style="padding:5px 1px;text-align:center">4H</td><td style="padding:5px 1px;text-align:center">1D</td><td style="padding:5px 1px;text-align:center;color:#3498db">1H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">4H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">1D SRSI</td><td style="padding:5px 2px;text-align:center;color:#27ae60">多</td><td style="padding:5px 2px;text-align:center;color:#e74c3c">空</td></tr>'
+    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666"><td style="padding:5px 3px">币种</td><td style="padding:5px 1px;text-align:center">1H</td><td style="padding:5px 1px;text-align:center">4H</td><td style="padding:5px 1px;text-align:center">1D</td><td style="padding:5px 1px;text-align:center;color:#3498db">1H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">4H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">1D SRSI</td><td style="padding:5px 1px;text-align:center;color:#e67e22">CCI</td><td style="padding:5px 1px;text-align:center;color:#8e44ad">BB%</td><td style="padding:5px 2px;text-align:center;color:#27ae60">多</td><td style="padding:5px 2px;text-align:center;color:#e74c3c">空</td></tr>'
     for i,r in enumerate(results):
         if "_error" in r: continue
         bg = "#fff" if i%2==0 else "#fafbfc"
         nm = r["symbol"].replace("-SWAP","").replace("-USDT","")
         t = r["trends"]; s = r["srsis"]
+        cc = r.get("ccis", {}); bb = r.get("bbps", {})
+        cc1h = f"{cc.get('1H'):.0f}" if cc.get('1H') is not None else "N/A"
+        bb1h = f"{bb.get('1H'):.2f}" if bb.get('1H') is not None else "N/A"
+        cc_color = "#e74c3c" if isinstance(cc.get('1H'), (int,float)) and cc['1H'] > 100 else ("#27ae60" if isinstance(cc.get('1H'), (int,float)) and cc['1H'] < -100 else "#333")
+        bb_color = "#e74c3c" if isinstance(bb.get('1H'), (int,float)) and bb['1H'] > 0.7 else ("#27ae60" if isinstance(bb.get('1H'), (int,float)) and bb['1H'] < 0.3 else "#333")
         alert = r["bull"]>=ALERT_THRESHOLD or r["bear"]>=ALERT_THRESHOLD
         bd = "border-left:3px solid #e74c3c;" if alert else ""
         be_ = "🟢" if r["bull"]>=ALERT_THRESHOLD else ""
         re_ = "🔴" if r["bear"]>=ALERT_THRESHOLD else ""
         s1h,c1h,w1h=srf(s["1H"]); s4h,c4h,w4h=srf(s["4H"]); s1d,c1d,w1d=srf(s["1D"])
-        htm += f'<tr style="background:{bg};{bd}"><td style="padding:5px 3px;font-weight:bold">{nm}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1H"],"#999")};font-weight:bold;font-size:11px">{t["1H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["4H"],"#999")};font-weight:bold;font-size:11px">{t["4H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1D"],"#999")};font-weight:bold;font-size:11px">{t["1D"]}</td><td style="padding:5px 1px;text-align:center;color:{c1h};font-weight:{w1h}">{s1h}</td><td style="padding:5px 1px;text-align:center;color:{c4h};font-weight:{w4h}">{s4h}</td><td style="padding:5px 1px;text-align:center;color:{c1d};font-weight:{w1d}">{s1d}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td></tr>'
+        htm += f'<tr style="background:{bg};{bd}"><td style="padding:5px 3px;font-weight:bold">{nm}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1H"],"#999")};font-weight:bold;font-size:11px">{t["1H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["4H"],"#999")};font-weight:bold;font-size:11px">{t["4H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1D"],"#999")};font-weight:bold;font-size:11px">{t["1D"]}</td><td style="padding:5px 1px;text-align:center;color:{c1h};font-weight:{w1h}">{s1h}</td><td style="padding:5px 1px;text-align:center;color:{c4h};font-weight:{w4h}">{s4h}</td><td style="padding:5px 1px;text-align:center;color:{c1d};font-weight:{w1d}">{s1d}</td><td style="padding:5px 1px;text-align:center;color:{cc_color};font-size:11px">{cc1h}</td><td style="padding:5px 1px;text-align:center;color:{bb_color};font-size:11px">{bb1h}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td></tr>'
     htm += '</table>'
     htm += '<div style="margin-top:10px"><p style="font-size:11px;font-weight:bold;color:#666;margin:0 0 4px">📊 多标准评分对比</p>'
     htm += '<table style="width:100%;border-collapse:collapse;font-size:11px">'
@@ -527,23 +545,40 @@ def _send_wecom_alert(alerts):
 def scan_symbol(sym):
     row = {"symbol": sym}
     trends = {}; trends_sw = {}; srsis = {}; adxs = {}
+    emas = {}; ccis = {}; cci_dirs = {}; bbps = {}; bolls = {}; macds = {}
     for tf_label, bar in [("1H", "1H"), ("4H", "4H"), ("1D", "1D")]:
         candles = fetch_ohlcv(sym, bar)
         if not candles or len(candles) < 20:
             trends[tf_label] = "N/A"; trends_sw[tf_label] = "N/A"
             srsis[tf_label] = None; adxs[tf_label] = None
+            emas[tf_label] = "N/A"; ccis[tf_label] = None; cci_dirs[tf_label] = "N/A"
+            bbps[tf_label] = None; bolls[tf_label] = "N/A"; macds[tf_label] = None
             continue
         closes = [c["c"] for c in candles]
         d, adx, _ = trend_dmi(candles)
         sw = trend_swing(candles)
         sr = calc_stoch_rsi(closes)
+        ea = trend_ema_cross(candles)
+        cci_val = calc_cci(candles)
+        cci_dir_val = trend_cci(candles)
+        _, _, _, _, bb_b = calc_bollinger(closes)
+        boll_dir = trend_bollinger(candles)
+        macd_val, _, _ = calc_macd(closes)
         trends[tf_label] = d; trends_sw[tf_label] = sw
         srsis[tf_label] = round(sr, 1) if sr is not None else None
         adxs[tf_label] = round(adx, 1) if adx is not None else None
+        emas[tf_label] = ea
+        ccis[tf_label] = round(cci_val, 0) if cci_val is not None else None
+        cci_dirs[tf_label] = cci_dir_val
+        bbps[tf_label] = round(bb_b, 2) if bb_b is not None else None
+        bolls[tf_label] = boll_dir
+        macds[tf_label] = round(macd_val, 4) if macd_val is not None else None
         time.sleep(0.15)
     (dmi_b, dmi_s), (adx_b, adx_s), (sw_b, sw_s) = calc_multi_score(trends, trends_sw, srsis, adxs)
     row["trends"] = trends; row["trends_sw"] = trends_sw
     row["srsis"] = srsis; row["adxs"] = adxs
+    row["emas"] = emas; row["ccis"] = ccis; row["cci_dirs"] = cci_dirs
+    row["bbps"] = bbps; row["bolls"] = bolls; row["macds"] = macds
     row["bull"] = dmi_b; row["bear"] = dmi_s
     row["bull_adx"] = adx_b; row["bear_adx"] = adx_s
     row["bull_sw"] = sw_b; row["bear_sw"] = sw_s
@@ -553,14 +588,23 @@ def scan_symbol(sym):
 def fmt_srsi(v):
     return f"{v:.1f}" if v is not None else "N/A"
 
+def fmt_val(v):
+    if v is None: return "N/A"
+    if isinstance(v, float):
+        if abs(v) < 10: return f"{v:.2f}"
+        return f"{v:.0f}"
+    return str(v)
+
 def fmt_line(row):
     name = row["symbol"].replace("-SWAP", "").replace("-USDT", "")
     t = row["trends"]; s = row["srsis"]; bull, bear = row["bull"], row["bear"]
     b_flag = "🟢" if bull >= ALERT_THRESHOLD else "  "
     r_flag = "🔴" if bear >= ALERT_THRESHOLD else "  "
+    cc = row.get("ccis", {}); bb = row.get("bbps", {})
     return (f"{name:<10} {t['1H']:^4} {t['4H']:^4} {t['1D']:^4} "
-            f"{fmt_srsi(s['1H']):>7} {fmt_srsi(s['4H']):>7} {fmt_srsi(s['1D']):>7}  "
-            f"{b_flag}{bull:<3}   {r_flag}{bear}")
+            f"{fmt_srsi(s['1H']):>7} {fmt_srsi(s['4H']):>7} {fmt_srsi(s['1D']):>7} "
+            f"{fmt_val(cc.get('1H')):>7} {fmt_val(bb.get('1H')):>6}  "
+            f"{b_flag}{bull:<4}   {r_flag}{bear}")
 
 # ── 主函数 ──
 def main():
@@ -611,8 +655,8 @@ def main():
             name = a["symbol"].replace("-SWAP","").replace("-USDT","")
             print(f"  {emoji} {name} {a['type']}分={a['score']}")
     
-    print(f"\n{'币种':<10} {'1H':^4} {'4H':^4} {'1D':^4} {'1H SRSI':>7} {'4H SRSI':>7} {'1D SRSI':>7}   多分     空分")
-    print("-" * 76)
+    print(f"\n{'币种':<10} {'1H':^4} {'4H':^4} {'1D':^4} {'1H SRSI':>7} {'4H SRSI':>7} {'1D SRSI':>7} {'1H CCI':>7} {'1H BB':>6}   {'多分':>4}  {'空分':>4}")
+    print("-" * 92)
     for r in results:
         if "_error" in r:
             name = r["symbol"].replace("-SWAP","").replace("-USDT","")

@@ -23,6 +23,12 @@ def load_scans():
                 for k in ('adx_1h','adx_4h','adx_1d','srsi_1h','srsi_4h','srsi_1d'):
                     try: row[k] = None if row.get(k,'') == '' else round(float(row.get(k,'')),1)
                     except: row[k] = None
+                for k in ('cci_1h','cci_4h','cci_1d'):
+                    try: row[k] = None if row.get(k,'') == '' else round(float(row.get(k,'')),0)
+                    except: row[k] = None
+                for k in ('bbp_1h','bbp_4h','bbp_1d'):
+                    try: row[k] = None if row.get(k,'') == '' else round(float(row.get(k,'')),2)
+                    except: row[k] = None
                 for k in ('dmi_bull','dmi_bear','sw_bull','sw_bear'):
                     try: row[k] = int(row[k])
                     except: pass
@@ -257,6 +263,10 @@ function buildScanHeader(cols){{
   const labels={{timestamp:'时间',symbol:'币种',dmi_1h:'DMI 1H',dmi_4h:'DMI 4H',dmi_1d:'DMI 1D',
     sw_1h:'SW 1H',sw_4h:'SW 4H',sw_1d:'SW 1D',adx_1h:'ADX 1H',adx_4h:'ADX 4H',adx_1d:'ADX 1D',
     srsi_1h:'SRSI 1H',srsi_4h:'SRSI 4H',srsi_1d:'SRSI 1D',
+    ema_1h:'EMA 1H',ema_4h:'EMA 4H',ema_1d:'EMA 1D',
+    cci_1h:'CCI 1H',cci_4h:'CCI 4H',cci_1d:'CCI 1D',
+    bbp_1h:'BB% 1H',bbp_4h:'BB% 4H',bbp_1d:'BB% 1D',
+    boll_1h:'BOLL 1H',boll_4h:'BOLL 4H',boll_1d:'BOLL 1D',
     dmi_bull:'DMI多',dmi_bear:'DMI空',adx_bull:'ADX多',adx_bear:'ADX空',sw_bull:'SW多',sw_bear:'SW空'}};
   document.getElementById('scanHead').innerHTML='<tr>'+cols.map(c=>`<th onclick="sortBy('scan','${{c}}')">${{labels[c]||c}}</th>`).join('')+'</tr>';
 }}
@@ -344,12 +354,31 @@ function renderScan(rows){{
     return '<tr class="'+alert+'">'+cols.map(c=>{{
       let v=r[c];
       if(v===null||v===undefined||v==='')return'<td><span class="na">-</span></td>';
-      if(['dmi_1h','dmi_4h','dmi_1d','sw_1h','sw_4h','sw_1d'].includes(c))
-        return`<td style="color:${{v==='多'?'#27ae60':v==='空'?'#e74c3c':'#999'}};font-weight:bold">${{v}}</td>`;
+      if(['dmi_1h','dmi_4h','dmi_1d','sw_1h','sw_4h','sw_1d','ema_1h','ema_4h','ema_1d','boll_1h','boll_4h','boll_1d'].includes(c))
+        return`<td style="color:${{v==='多'?'#27ae60':v==='空'?'#e74c3c':'#999'}};font-weight:bold;font-size:11px">${{v}}</td>`;
       if(c==='symbol')return`<td style="font-weight:bold">${{(v||'').replace('-USDT-SWAP','').replace('-USDT','').replace('-SWAP','')}}</td>`;
       if(['dmi_bull','sw_bull'].includes(c))return`<td>${{v>=6?'<span class="score-high" style="color:#27ae60">'+v+'</span>':v}}</td>`;
       if(['dmi_bear','sw_bear'].includes(c))return`<td>${{v>=6?'<span class="score-high" style="color:#e74c3c">'+v+'</span>':v}}</td>`;
       if(['adx_bull','adx_bear'].includes(c)&&+v>=6)return`<td><span class="score-high" style="color:#27ae60">${{v}}</span></td>`;
+      if(c.startsWith('cci_')){{
+        const n=+v;
+        if(n>100)return`<td style="color:#e74c3c;font-weight:bold">${{v}}</td>`;
+        if(n<-100)return`<td style="color:#27ae60;font-weight:bold">${{v}}</td>`;
+        if(n>0)return`<td style="color:#27ae60">${{v}}</td>`;
+        return`<td style="color:#e74c3c">${{v}}</td>`;
+      }}
+      if(c.startsWith('bbp_')){{
+        const n=+v;
+        if(n>0.7)return`<td style="color:#e74c3c;font-weight:bold">${{v.toFixed(2)}}</td>`;
+        if(n<0.3)return`<td style="color:#27ae60;font-weight:bold">${{v.toFixed(2)}}</td>`;
+        return`<td>${{typeof v==='number'?v.toFixed(2):v}}</td>`;
+      }}
+      if(c.startsWith('srsi_')){{
+        const n=+v;
+        if(n>80)return`<td style="color:#e74c3c;font-weight:bold">${{v}}</td>`;
+        if(n<20)return`<td style="color:#27ae60;font-weight:bold">${{v}}</td>`;
+        return`<td>${{v}}</td>`;
+      }}
       return`<td>${{v}}</td>`;
     }}).join('')+'</tr>';
   }}).join('');
