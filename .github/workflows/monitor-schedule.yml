@@ -1,4 +1,4 @@
-name: OKX Strategy Monitor (15min)
+name: Monitor Schedule
 
 on:
   schedule:
@@ -18,7 +18,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install deps
-        run: pip install requests --quiet
+        run: pip install requests urllib3 --quiet
 
       - name: Get date
         id: date
@@ -31,7 +31,7 @@ jobs:
           path: okx_data/scans/
         continue-on-error: true
 
-      - name: Run monitor (appends to CSV)
+      - name: Run monitor
         run: python okx_monitor.py
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
@@ -44,18 +44,6 @@ jobs:
           if-no-files-found: warn
           overwrite: true
 
-      - name: Generate viewer HTML
-        run: python analysis/build_viewer.py
-
-      - name: Upload viewer HTML
-        uses: actions/upload-artifact@v4
-        with:
-          name: viewer
-          path: okx_data/viewer.html
-          if-no-files-found: warn
-          overwrite: true
-
-  # 每日更新热门品种列表 (UTC 23:00 = CST 7:00)
   refresh-symbols:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
