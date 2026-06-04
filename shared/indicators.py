@@ -51,16 +51,19 @@ def calc_rsi(closes, period=14):
         rsi_values.append(100 if avg_loss == 0 else 100 - 100 / (1 + avg_gain / avg_loss))
     return rsi_values[-1], rsi_values
 
-# ── StochRSI (K+D)/2 ──
-def calc_stoch_rsi(closes, rsi_period=14, stoch_period=14):
+# ── StochRSI (K+D)/2, K经SMA(3)平滑匹配TradingView ──
+def calc_stoch_rsi(closes, rsi_period=14, stoch_period=14, smooth_k=3):
     _, rsi_values = calc_rsi(closes, rsi_period)
-    if not rsi_values or len(rsi_values) < stoch_period:
+    if not rsi_values or len(rsi_values) < stoch_period + smooth_k:
         return None
-    k_vals = []
+    k_raw = []
     for i in range(stoch_period - 1, len(rsi_values)):
         w = rsi_values[i - stoch_period + 1 : i + 1]
         lo, hi = min(w), max(w)
-        k_vals.append(50 if hi == lo else (rsi_values[i] - lo) / (hi - lo) * 100)
+        k_raw.append(50 if hi == lo else (rsi_values[i] - lo) / (hi - lo) * 100)
+    k_vals = []
+    for i in range(smooth_k - 1, len(k_raw)):
+        k_vals.append(sum(k_raw[i - smooth_k + 1 : i + 1]) / smooth_k)
     if len(k_vals) < 4:
         return k_vals[-1] if k_vals else None
     d = sum(k_vals[-3:]) / 3
