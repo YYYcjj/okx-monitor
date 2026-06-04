@@ -977,27 +977,44 @@ async function runLiveTest(){{
   
   document.getElementById('liveStatus').innerHTML = `<span style="color:#27ae60">✅ ${{sym}} 指标已获取</span>`;
   
-  // Render
-  let h = '<div class="live-card"><h3>📊 指标数值</h3><div class="live-grid">';
+  // Render indicator table
   const tfs = ['1H','4H','1D'];
   const tfLabels = {{'1H':'1小时','4H':'4小时','1D':'日线'}};
+  let h = '<div class="live-card"><h3>📊 指标一览</h3>';
+  h+=`<div style="overflow-x:auto"><table style="width:100%;font-size:13px;border-collapse:collapse">`;
+  h+=`<tr style="background:#f0f1f5;font-weight:bold;color:#666;font-size:12px">
+    <td style="padding:6px 8px">周期</td>
+    <td style="padding:6px 8px;text-align:center">DMI</td>
+    <td style="padding:6px 8px;text-align:center">摆动</td>
+    <td style="padding:6px 8px;text-align:center">EMA</td>
+    <td style="padding:6px 8px;text-align:center">BOLL</td>
+    <td style="padding:6px 8px;text-align:center">CCI</td>
+    <td style="padding:6px 8px;text-align:center;color:#3498db">StochRSI</td>
+    <td style="padding:6px 8px;text-align:center">ADX</td>
+  </tr>`;
   for(let tf of tfs){{
     let r = results[tf];
-    if(!r||r.error){{h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}}</div><div class="lc-val" style="color:#e74c3c">获取失败</div></div>`;continue;}}
-    h+=`<div class="live-cell">
-      <div class="lc-label">${{tfLabels[tf]}} 方向</div>
-      <div class="lc-val" style="color:${{r.dmi==='多'?'#27ae60':r.dmi==='空'?'#e74c3c':'#999'}}">${{r.dmi}}${{tf==='1D'?'<span style="font-size:10px;color:#888">(摆动)</span>':''}}</div>
-    </div>`;
-    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} StochRSI</div><div class="lc-val" style="color:${{r.srsi!==null?(r.srsi>80?'#e74c3c':r.srsi<20?'#27ae60':'#333'):'#999'}}">${{r.srsi!==null?r.srsi:'N/A'}}</div></div>`;
-    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} ADX</div><div class="lc-val">${{r.adx!==null?r.adx:'N/A'}}</div></div>`;
-    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} CCI</div><div class="lc-val" style="color:${{r.cci!==null?(r.cci>100?'#e74c3c':r.cci<-100?'#27ae60':'#333'):'#999'}}">${{r.cci!==null?r.cci:'N/A'}}</div></div>`;
-    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} BB%</div><div class="lc-val" style="color:${{r.bb_pct!==null?(r.bb_pct>0.7?'#e74c3c':r.bb_pct<0.3?'#27ae60':'#333'):'#999'}}">${{r.bb_pct!==null?r.bb_pct:'N/A'}}</div></div>`;
-    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} EMA</div><div class="lc-val" style="color:${{r.ema==='多'?'#27ae60':r.ema==='空'?'#e74c3c':'#999'}}">${{r.ema}}</div></div>`;
-    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} 摆动点</div><div class="lc-val" style="color:${{r.swing==='多'?'#27ae60':r.swing==='空'?'#e74c3c':'#999'}}">${{r.swing}}</div></div>`;
-    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} BOLL方向</div><div class="lc-val" style="color:${{r.boll_dir==='多'?'#27ae60':r.boll_dir==='空'?'#e74c3c':'#999'}}">${{r.boll_dir}}</div></div>`;
-    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} CCI方向</div><div class="lc-val" style="color:${{r.cci_dir==='多'?'#27ae60':r.cci_dir==='空'?'#e74c3c':'#999'}}">${{r.cci_dir}}</div></div>`;
+    if(!r||r.error){{
+      h+=`<tr><td style="padding:6px 8px;font-weight:bold">${{tfLabels[tf]}}</td><td colspan="7" style="padding:6px 8px;color:#e74c3c;text-align:center">获取失败</td></tr>`;
+      continue;
+    }}
+    let dirColor = v=>v==='多'?'#27ae60':v==='空'?'#e74c3c':'#999';
+    let srsiColor = r.srsi!==null?(r.srsi>80?'#e74c3c':r.srsi<20?'#27ae60':'#333'):'#999';
+    let cciColor = r.cci!==null?(r.cci>100?'#e74c3c':r.cci<-100?'#27ae60':'#333'):'#999';
+    let swingLabel = tf==='1D' ? `<span style="color:${{dirColor(r.swing)}};font-weight:bold">${{r.swing}}</span><span style="font-size:9px;color:#888">(摆)</span>` : `<span style="color:${{dirColor(r.swing)}};font-weight:bold">${{r.swing}}</span>`;
+    let bg = tf==='1D'?'#fffef5':'#fff';
+    h+=`<tr style="background:${{bg}};border-top:1px solid #f0f0f0">
+      <td style="padding:6px 8px;font-weight:bold">${{tfLabels[tf]}}</td>
+      <td style="padding:6px 8px;text-align:center;color:${{dirColor(r.dmi)}};font-weight:bold;font-size:14px">${{r.dmi}}</td>
+      <td style="padding:6px 8px;text-align:center">${{swingLabel}}</td>
+      <td style="padding:6px 8px;text-align:center;color:${{dirColor(r.ema)}};font-weight:bold">${{r.ema}}</td>
+      <td style="padding:6px 8px;text-align:center;color:${{dirColor(r.boll_dir)}};font-weight:bold">${{r.boll_dir}}</td>
+      <td style="padding:6px 8px;text-align:center;color:${{cciColor}};font-weight:bold">${{r.cci!==null?r.cci:'N/A'}}</td>
+      <td style="padding:6px 8px;text-align:center;color:${{srsiColor}};font-weight:bold;font-size:14px">${{r.srsi!==null?r.srsi:'N/A'}}</td>
+      <td style="padding:6px 8px;text-align:center">${{r.adx!==null?r.adx:'N/A'}}</td>
+    </tr>`;
   }}
-  h+='</div></div>';
+  h+='</table></div></div>';
 
   // Score cards
   let net = Math.abs(score.bull-score.bear);
