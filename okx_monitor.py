@@ -60,20 +60,29 @@ def calc_rsi(closes, period=14):
         rsi_values.append(100 if avg_loss == 0 else 100 - 100 / (1 + avg_gain / avg_loss))
     return rsi_values[-1], rsi_values
 
-# ── StochRSI (K+D)/2 ──
-def calc_stoch_rsi(closes, rsi_period=14, stoch_period=14):
+# ── StochRSI (TradingView标准: RSI14→Stoch14→K=SMA3→D=SMA3, 输出%K) ──
+def calc_stoch_rsi(closes, rsi_period=14, stoch_period=14, smooth_k=3, smooth_d=3):
     _, rsi_values = calc_rsi(closes, rsi_period)
-    if not rsi_values or len(rsi_values) < stoch_period:
+    if not rsi_values or len(rsi_values) < stoch_period + smooth_k:
         return None
-    k_vals = []
+    # Step 1: Stochastic of RSI (%K raw)
+    k_raw = []
     for i in range(stoch_period - 1, len(rsi_values)):
         w = rsi_values[i - stoch_period + 1 : i + 1]
         lo, hi = min(w), max(w)
-        k_vals.append(50 if hi == lo else (rsi_values[i] - lo) / (hi - lo) * 100)
-    if len(k_vals) < 4:
-        return k_vals[-1] if k_vals else None
-    d = sum(k_vals[-3:]) / 3
-    return (k_vals[-1] + d) / 2
+        k_raw.append(50 if hi == lo else (rsi_values[i] - lo) / (hi - lo) * 100)
+    # Step 2: %K = SMA(%K_raw, 3)
+    k_smoothed = []
+    for i in range(smooth_k - 1, len(k_raw)):
+        k_smoothed.append(sum(k_raw[i - smooth_k + 1 : i + 1]) / smooth_k)
+    if not k_smoothed:
+        return None
+    # Step 3: %D = SMA(%K, 3)
+    d_smoothed = []
+    for i in range(smooth_d - 1, len(k_smoothed)):
+        d_smoothed.append(sum(k_smoothed[i - smooth_d + 1 : i + 1]) / smooth_d)
+    # TradingView 主图显示 %K
+    return round(k_smoothed[-1], 1)
 
 # ── ATR (Wilder's smoothing) ──
 def calc_atr(candles, period=14):
