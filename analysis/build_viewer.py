@@ -980,38 +980,27 @@ async function runLiveTest(){{
   // Render indicator table
   const tfs = ['1H','4H','1D'];
   const tfLabels = {{'1H':'1小时','4H':'4小时','1D':'日线'}};
-  let h = '<div class="live-card"><h3>📊 指标一览</h3>';
+  let h = '<div class="live-card"><h3>📊 方向 & SRSI</h3>';
   h+=`<div style="overflow-x:auto"><table style="width:100%;font-size:13px;border-collapse:collapse">`;
   h+=`<tr style="background:#f0f1f5;font-weight:bold;color:#666;font-size:12px">
     <td style="padding:6px 8px">周期</td>
-    <td style="padding:6px 8px;text-align:center">DMI</td>
-    <td style="padding:6px 8px;text-align:center">摆动</td>
-    <td style="padding:6px 8px;text-align:center">EMA</td>
-    <td style="padding:6px 8px;text-align:center">BOLL</td>
-    <td style="padding:6px 8px;text-align:center">CCI</td>
+    <td style="padding:6px 8px;text-align:center">方向</td>
     <td style="padding:6px 8px;text-align:center;color:#3498db">StochRSI</td>
-    <td style="padding:6px 8px;text-align:center">ADX</td>
   </tr>`;
   for(let tf of tfs){{
     let r = results[tf];
     if(!r||r.error){{
-      h+=`<tr><td style="padding:6px 8px;font-weight:bold">${{tfLabels[tf]}}</td><td colspan="7" style="padding:6px 8px;color:#e74c3c;text-align:center">获取失败</td></tr>`;
+      h+=`<tr><td style="padding:6px 8px;font-weight:bold">${{tfLabels[tf]}}</td><td colspan="2" style="padding:6px 8px;color:#e74c3c;text-align:center">获取失败</td></tr>`;
       continue;
     }}
-    let dirColor = v=>v==='多'?'#27ae60':v==='空'?'#e74c3c':'#999';
+    let dirColor = r.dmi==='多'?'#27ae60':r.dmi==='空'?'#e74c3c':'#999';
+    let dirLabel = r.dmi==='N/A'?'N/A':`${{r.dmi}}${{tf==='1D'?' <span style="font-size:9px;color:#888">(摆)</span>':''}}`;
     let srsiColor = r.srsi!==null?(r.srsi>80?'#e74c3c':r.srsi<20?'#27ae60':'#333'):'#999';
-    let cciColor = r.cci!==null?(r.cci>100?'#e74c3c':r.cci<-100?'#27ae60':'#333'):'#999';
-    let swingLabel = tf==='1D' ? `<span style="color:${{dirColor(r.swing)}};font-weight:bold">${{r.swing}}</span><span style="font-size:9px;color:#888">(摆)</span>` : `<span style="color:${{dirColor(r.swing)}};font-weight:bold">${{r.swing}}</span>`;
     let bg = tf==='1D'?'#fffef5':'#fff';
     h+=`<tr style="background:${{bg}};border-top:1px solid #f0f0f0">
       <td style="padding:6px 8px;font-weight:bold">${{tfLabels[tf]}}</td>
-      <td style="padding:6px 8px;text-align:center;color:${{dirColor(r.dmi)}};font-weight:bold;font-size:14px">${{r.dmi}}</td>
-      <td style="padding:6px 8px;text-align:center">${{swingLabel}}</td>
-      <td style="padding:6px 8px;text-align:center;color:${{dirColor(r.ema)}};font-weight:bold">${{r.ema}}</td>
-      <td style="padding:6px 8px;text-align:center;color:${{dirColor(r.boll_dir)}};font-weight:bold">${{r.boll_dir}}</td>
-      <td style="padding:6px 8px;text-align:center;color:${{cciColor}};font-weight:bold">${{r.cci!==null?r.cci:'N/A'}}</td>
+      <td style="padding:6px 8px;text-align:center;color:${{dirColor}};font-weight:bold;font-size:14px">${{dirLabel}}</td>
       <td style="padding:6px 8px;text-align:center;color:${{srsiColor}};font-weight:bold;font-size:14px">${{r.srsi!==null?r.srsi:'N/A'}}</td>
-      <td style="padding:6px 8px;text-align:center">${{r.adx!==null?r.adx:'N/A'}}</td>
     </tr>`;
   }}
   h+='</table></div></div>';
