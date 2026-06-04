@@ -525,6 +525,8 @@ def _send_pushplus_alert(alerts, now_str):
         name = a["symbol"].replace("-SWAP", "").replace("-USDT", "")
         htm += f'<p style="margin:4px 0;font-size:15px;font-weight:bold">{emoji} {name} {a["type"]}分={a["score"]}</p>'
         htm += f'<p style="margin:1px 0;font-size:11px;color:#666">方向: {a.get("t_1h","")}/{a.get("t_4h","")}/{a.get("t_1d","")} | SRSI: {a.get("s_1h","")}/{a.get("s_4h","")}/{a.get("s_1d","")}</p>'
+        net_str = f"多+{a['net']}" if a['bull'] > a['bear'] else (f"空+{a['net']}" if a['bear'] > a['bull'] else "0")
+        htm += f'<p style="margin:1px 0;font-size:12px;color:#333">多{a["bull"]} · 空{a["bear"]} · 净值{net_str}</p>'
     htm += f'<hr style="border:0;border-top:1px solid #eee;margin:6px 0"><p style="color:#999;font-size:10px;margin:0">📐 DMI/ADX | 15min扫描 | ≥{ALERT_THRESHOLD}预警 | 下轮 {next_hour_cst()} CST</p></div>'
     payload = {"token": PUSHPLUS_TOKEN, "title": f"⚠️ OKX {len(alerts)}个高分预警", "content": htm, "template": "html"}
     try:
@@ -676,11 +678,13 @@ def main():
         if r["bull"] >= ALERT_THRESHOLD:
             alerts.append({"type":"多","symbol":r["symbol"],"score":r["bull"],
                 "t_1h":t["1H"],"t_4h":t["4H"],"t_1d":t["1D"],
-                "s_1h":fmt_srsi(s["1H"]),"s_4h":fmt_srsi(s["4H"]),"s_1d":fmt_srsi(s["1D"])})
+                "s_1h":fmt_srsi(s["1H"]),"s_4h":fmt_srsi(s["4H"]),"s_1d":fmt_srsi(s["1D"]),
+                "bull":r["bull"],"bear":r["bear"],"net":abs(r["bull"]-r["bear"])})
         if r["bear"] >= ALERT_THRESHOLD:
             alerts.append({"type":"空","symbol":r["symbol"],"score":r["bear"],
                 "t_1h":t["1H"],"t_4h":t["4H"],"t_1d":t["1D"],
-                "s_1h":fmt_srsi(s["1H"]),"s_4h":fmt_srsi(s["4H"]),"s_1d":fmt_srsi(s["1D"])})
+                "s_1h":fmt_srsi(s["1H"]),"s_4h":fmt_srsi(s["4H"]),"s_1d":fmt_srsi(s["1D"]),
+                "bull":r["bull"],"bear":r["bear"],"net":abs(r["bull"]-r["bear"])})
     
     save_scan_csv(results, now)
     
