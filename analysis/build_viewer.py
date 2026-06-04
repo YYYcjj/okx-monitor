@@ -947,7 +947,8 @@ async function runLiveTest(){{
       if(!candles||candles.length<20){{results[bar]={{error:'数据不足'}};continue;}}
       let closes = candles.map(c=>c.c);
       let dmi = trendDMI(candles);
-      let sw = bar==='1D'?trendSwing(candles):dmi.d;
+      let swingCandles = bar==='1D' ? candles.slice(-60) : candles;
+      let sw = bar==='1D'?trendSwing(swingCandles):dmi.d;
       let srsi = calcStochRSI(closes);
       let adx = dmi.adx;
       let ema = trendEMACross(candles);

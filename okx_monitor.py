@@ -586,7 +586,8 @@ def scan_symbol(sym):
             continue
         closes = [c["c"] for c in candles]
         d, adx, _ = trend_dmi(candles)
-        sw = trend_swing(candles)
+        # 1D摆动点只看近60根K线（≈3个月），避免远古低点误判
+        sw = trend_swing(candles) if tf_label != "1D" else trend_swing(candles[-60:])
         sr = calc_stoch_rsi(closes)
         ea = trend_ema_cross(candles)
         cci_val = calc_cci(candles)
