@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 
 # ── 内联指标库 ──
 OKX_BASE = "https://www.okx.com"
-DIR_SCORE = {"1H": 1, "4H": 2, "1D": 4}
+DIR_SCORE = {"1H": 1, "4H": 2, "1D": 3}
 # ── 数据获取 ──
 def fetch_ohlcv(symbol, bar, limit=200, retries=3):
     url = f"{OKX_BASE}/api/v5/market/candles"
