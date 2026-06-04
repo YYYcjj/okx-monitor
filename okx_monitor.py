@@ -465,7 +465,7 @@ def _send_pushplus_full(results, now_str):
             if r.get("bear",0) >= ALERT_THRESHOLD: htm += f'<p style="margin:2px 0;font-size:14px">🔴 <b>{nm}</b> 空分={r["bear"]}</p>'
         htm += '<hr style="border:0;border-top:1px solid #eee;margin:8px 0">'
     htm += '<table style="width:100%;border-collapse:collapse;font-size:12px">'
-    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666"><td style="padding:5px 3px">币种</td><td style="padding:5px 1px;text-align:center">1H</td><td style="padding:5px 1px;text-align:center">4H</td><td style="padding:5px 1px;text-align:center">1D</td><td style="padding:5px 1px;text-align:center;color:#3498db">1H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">4H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">1D SRSI</td><td style="padding:5px 1px;text-align:center;color:#e67e22">CCI</td><td style="padding:5px 1px;text-align:center;color:#8e44ad">BB%</td><td style="padding:5px 2px;text-align:center;color:#27ae60">多</td><td style="padding:5px 2px;text-align:center;color:#e74c3c">空</td></tr>'
+    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666"><td style="padding:5px 3px">币种</td><td style="padding:5px 1px;text-align:center">1H</td><td style="padding:5px 1px;text-align:center">4H</td><td style="padding:5px 1px;text-align:center">1D</td><td style="padding:5px 1px;text-align:center;color:#3498db">1H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">4H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">1D SRSI</td><td style="padding:5px 1px;text-align:center;color:#e67e22">CCI</td><td style="padding:5px 1px;text-align:center;color:#8e44ad">BB%</td><td style="padding:5px 2px;text-align:center;color:#27ae60">多</td><td style="padding:5px 2px;text-align:center;color:#e74c3c">空</td><td style="padding:5px 2px;text-align:center;color:#333">净值</td></tr>'
     for i,r in enumerate(results):
         if "_error" in r: continue
         bg = "#fff" if i%2==0 else "#fafbfc"
@@ -481,7 +481,14 @@ def _send_pushplus_full(results, now_str):
         be_ = "🟢" if r["bull"]>=ALERT_THRESHOLD else ""
         re_ = "🔴" if r["bear"]>=ALERT_THRESHOLD else ""
         s1h,c1h,w1h=srf(s["1H"]); s4h,c4h,w4h=srf(s["4H"]); s1d,c1d,w1d=srf(s["1D"])
-        htm += f'<tr style="background:{bg};{bd}"><td style="padding:5px 3px;font-weight:bold">{nm}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1H"],"#999")};font-weight:bold;font-size:11px">{t["1H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["4H"],"#999")};font-weight:bold;font-size:11px">{t["4H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1D"],"#999")};font-weight:bold;font-size:11px">{t["1D"]}</td><td style="padding:5px 1px;text-align:center;color:{c1h};font-weight:{w1h}">{s1h}</td><td style="padding:5px 1px;text-align:center;color:{c4h};font-weight:{w4h}">{s4h}</td><td style="padding:5px 1px;text-align:center;color:{c1d};font-weight:{w1d}">{s1d}</td><td style="padding:5px 1px;text-align:center;color:{cc_color};font-size:11px">{cc1h}</td><td style="padding:5px 1px;text-align:center;color:{bb_color};font-size:11px">{bb1h}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td></tr>'
+        net = abs(r["bull"] - r["bear"])
+        if r["bull"] > r["bear"]:
+            net_str = f"多+{net}"; net_color = "#27ae60"
+        elif r["bear"] > r["bull"]:
+            net_str = f"空+{net}"; net_color = "#e74c3c"
+        else:
+            net_str = "0"; net_color = "#999"
+        htm += f'<tr style="background:{bg};{bd}"><td style="padding:5px 3px;font-weight:bold">{nm}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1H"],"#999")};font-weight:bold;font-size:11px">{t["1H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["4H"],"#999")};font-weight:bold;font-size:11px">{t["4H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1D"],"#999")};font-weight:bold;font-size:11px">{t["1D"]}</td><td style="padding:5px 1px;text-align:center;color:{c1h};font-weight:{w1h}">{s1h}</td><td style="padding:5px 1px;text-align:center;color:{c4h};font-weight:{w4h}">{s4h}</td><td style="padding:5px 1px;text-align:center;color:{c1d};font-weight:{w1d}">{s1d}</td><td style="padding:5px 1px;text-align:center;color:{cc_color};font-size:11px">{cc1h}</td><td style="padding:5px 1px;text-align:center;color:{bb_color};font-size:11px">{bb1h}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:{net_color}">{net_str}</td></tr>'
     htm += '</table>'
     htm += '<div style="margin-top:10px"><p style="font-size:11px;font-weight:bold;color:#666;margin:0 0 4px">📊 多标准评分对比</p>'
     htm += '<table style="width:100%;border-collapse:collapse;font-size:11px">'
@@ -624,10 +631,14 @@ def fmt_line(row):
     b_flag = "🟢" if bull >= ALERT_THRESHOLD else "  "
     r_flag = "🔴" if bear >= ALERT_THRESHOLD else "  "
     cc = row.get("ccis", {}); bb = row.get("bbps", {})
+    net = abs(bull - bear)
+    if bull > bear: net_s = f"多+{net}"
+    elif bear > bull: net_s = f"空+{net}"
+    else: net_s = "0"
     return (f"{name:<10} {t['1H']:^4} {t['4H']:^4} {t['1D']:^4} "
             f"{fmt_srsi(s['1H']):>7} {fmt_srsi(s['4H']):>7} {fmt_srsi(s['1D']):>7} "
             f"{fmt_val(cc.get('1H')):>7} {fmt_val(bb.get('1H')):>6}  "
-            f"{b_flag}{bull:<4}   {r_flag}{bear}")
+            f"{b_flag}{bull:<4}   {r_flag}{bear:<4}  {net_s}")
 
 # ── 主函数 ──
 def main():
@@ -678,8 +689,8 @@ def main():
             name = a["symbol"].replace("-SWAP","").replace("-USDT","")
             print(f"  {emoji} {name} {a['type']}分={a['score']}")
     
-    print(f"\n{'币种':<10} {'1H':^4} {'4H':^4} {'1D':^4} {'1H SRSI':>7} {'4H SRSI':>7} {'1D SRSI':>7} {'1H CCI':>7} {'1H BB':>6}   {'多分':>4}  {'空分':>4}")
-    print("-" * 92)
+    print(f"\n{'币种':<10} {'1H':^4} {'4H':^4} {'1D':^4} {'1H SRSI':>7} {'4H SRSI':>7} {'1D SRSI':>7} {'1H CCI':>7} {'1H BB':>6}   {'多分':>4}  {'空分':>4}  {'净值':>6}")
+    print("-" * 102)
     for r in results:
         if "_error" in r:
             name = r["symbol"].replace("-SWAP","").replace("-USDT","")
