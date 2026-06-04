@@ -5,9 +5,11 @@ on:
     - cron: '0,15,30,45 * * * *'
   workflow_dispatch:
 
+# 全局超时保护（单个 job 最长 15 分钟）
 jobs:
   scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,11 +41,14 @@ jobs:
         continue-on-error: true
 
       - name: Run monitor
+        id: monitor
         run: python okx_monitor.py
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK || '' }}
 
       - name: Upload cumulative CSV
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: scan-data-${{ steps.date.outputs.date }}
@@ -52,6 +57,7 @@ jobs:
           overwrite: true
 
       - name: Upload cooldown state
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cooldown-state
@@ -62,12 +68,14 @@ jobs:
           overwrite: true
 
       - name: Generate viewer HTML
+        if: always()
         run: |
           python analysis/entry_exit_analysis.py
           python analysis/pairwise_winrate.py
           python analysis/build_viewer.py
 
       - name: Upload viewer HTML
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: viewer
@@ -78,8 +86,10 @@ jobs:
   deploy-pages:
     needs: scan
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
+    continue-on-error: true  # 私有仓库 Pages 可能不可用，不阻塞
     steps:
       - name: Download viewer HTML
         uses: actions/download-artifact@v4
@@ -98,10 +108,11 @@ jobs:
           git config user.email "bot@okx.local"
           git add index.html
           git commit -m "Deploy viewer" || true
-          git push -f https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git gh-pages
+          git push -f https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git gh-pages 2>/dev/null || echo "Pages push skipped (private repo or Pages not enabled)"
 
   refresh-symbols:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     if: github.event_name == 'schedule'
     permissions:
       contents: write
@@ -116,5 +127,9 @@ jobs:
         run: |
           git config user.name "OKX Bot"
           git config user.email "bot@okx.local"
-          git add SYMBOLS.txt
-          git diff --staged --quiet || git commit -m "[auto] 每日热门品种更新" && git push
+          git add SYMBOLS.txt FIXED_SYMBOLS.txt 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No symbol changes"
+          else
+            git commit -m "[auto] 每日热门品种更新" && git push
+          fi
