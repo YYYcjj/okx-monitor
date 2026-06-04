@@ -5,11 +5,12 @@ on:
     - cron: '0,15,30,45 * * * *'
   workflow_dispatch:
 
-# 全局超时保护（单个 job 最长 15 分钟）
 jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,13 +34,6 @@ jobs:
           path: okx_data/scans/
         continue-on-error: true
 
-      - name: Download cooldown state
-        uses: actions/download-artifact@v4
-        with:
-          name: cooldown-state
-          path: okx_data/
-        continue-on-error: true
-
       - name: Run monitor
         id: monitor
         run: python okx_monitor.py
@@ -47,23 +41,24 @@ jobs:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK || '' }}
 
+      - name: Commit cooldown state
+        if: always()
+        run: |
+          git config user.name "OKX Bot"
+          git config user.email "bot@okx.local"
+          git add .cooldown.json 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No cooldown changes"
+          else
+            git commit -m "[auto] 冷却状态更新" && git push
+          fi
+
       - name: Upload cumulative CSV
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: scan-data-${{ steps.date.outputs.date }}
           path: okx_data/scans/${{ steps.date.outputs.date }}.csv
-          if-no-files-found: warn
-          overwrite: true
-
-      - name: Upload cooldown state
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cooldown-state
-          path: |
-            okx_data/.last_push
-            okx_data/.symbol_cooldown.json
           if-no-files-found: warn
           overwrite: true
 
@@ -89,7 +84,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
-    continue-on-error: true  # 私有仓库 Pages 可能不可用，不阻塞
+    continue-on-error: true
     steps:
       - name: Download viewer HTML
         uses: actions/download-artifact@v4

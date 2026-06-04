@@ -380,57 +380,41 @@ def should_push_full(now):
     is_schedule = GITHUB_EVENT in ("schedule", "workflow_dispatch", "")
     return is_hourly and is_schedule
 
-def push_cooldown_ok():
-    """全局冷却: 任意推送后2小时内不重复（持久化到 okx_data/ 以支持 Actions artifact）"""
-    cooldown_file = os.path.join(PROJECT_ROOT, "okx_data", ".last_push")
-    if os.path.exists(cooldown_file):
+COOLDOWN_FILE = os.path.join(PROJECT_ROOT, ".cooldown.json")
+COOLDOWN_SECONDS = 3600  # 1小时
+
+def load_cooldown_state():
+    """加载冷却状态"""
+    if os.path.exists(COOLDOWN_FILE):
         try:
-            with open(cooldown_file) as f:
-                last = float(f.read().strip())
-            if time.time() - last < 7200:  # 2小时
-                return False
+            with open(COOLDOWN_FILE) as f:
+                data = json.load(f)
+            return data.get("global", 0), data.get("symbols", {})
         except:
             pass
-    return True
+    return 0, {}
 
-def save_cooldown():
-    """推送成功后记录时间戳"""
-    cooldown_file = os.path.join(PROJECT_ROOT, "okx_data", ".last_push")
-    with open(cooldown_file, "w") as f:
-        f.write(str(time.time()))
+def save_cooldown_state(global_ts, symbols):
+    """持久化冷却状态（git tracked，不再依赖 artifact）"""
+    os.makedirs(os.path.dirname(COOLDOWN_FILE) or ".", exist_ok=True)
+    with open(COOLDOWN_FILE, "w") as f:
+        json.dump({"global": global_ts, "symbols": symbols}, f)
+
+def push_cooldown_ok():
+    """全局冷却检查（仅对预警生效，整点全量绕过）"""
+    last, _ = load_cooldown_state()
+    if last and time.time() - last < COOLDOWN_SECONDS:
+        return False
+    return True
 
 def per_symbol_cooldown_ok(symbol, direction):
-    """同币种+同方向2小时内不重复推送"""
-    cooldown_file = os.path.join(PROJECT_ROOT, "okx_data", ".symbol_cooldown.json")
-    cooldowns = {}
-    if os.path.exists(cooldown_file):
-        try:
-            with open(cooldown_file) as f:
-                cooldowns = json.load(f)
-        except:
-            pass
+    """同币种+同方向 1 小时内不重复推送"""
+    _, symbols = load_cooldown_state()
     key = f"{symbol}_{direction}"
-    if key in cooldowns:
-        if time.time() - cooldowns[key] < 7200:
+    if key in symbols:
+        if time.time() - symbols[key] < COOLDOWN_SECONDS:
             return False
     return True
-
-def save_symbol_cooldown(symbol, direction):
-    """记录币种+方向冷却"""
-    cooldown_file = os.path.join(PROJECT_ROOT, "okx_data", ".symbol_cooldown.json")
-    cooldowns = {}
-    if os.path.exists(cooldown_file):
-        try:
-            with open(cooldown_file) as f:
-                cooldowns = json.load(f)
-        except:
-            pass
-    # 清理过期
-    now = time.time()
-    cooldowns = {k: v for k, v in cooldowns.items() if now - v < 7200}
-    cooldowns[f"{symbol}_{direction}"] = now
-    with open(cooldown_file, "w") as f:
-        json.dump(cooldowns, f)
 
 def is_daytime(now):
     return 7 <= now.hour <= 23
@@ -715,31 +699,39 @@ def main():
         print(f"{name:<10} {dmi_s:>8} {adx_s:>8} {sw_s:>8}")
     
     pushed = False
-    can_push = push_cooldown_ok()
-    if is_full_push and can_push:
+    global_ts, sym_cooldowns = load_cooldown_state()
+
+    if is_full_push:
+        # 整点全量报表 → 永远推送，不受冷却限制
         print(f"\n📤 日间整点，推送完整报表...")
         pushed = send_report(results, now_str)
-        if pushed:
-            save_cooldown()
+        global_ts = time.time() if pushed else global_ts
     elif alerts:
-        # 逐币种检查冷却，过滤已推送的
+        # 逐币种检查冷却
         new_alerts = []
         for a in alerts:
             if per_symbol_cooldown_ok(a["symbol"], a["type"]):
                 new_alerts.append(a)
             else:
                 name = a["symbol"].replace("-SWAP","").replace("-USDT","")
-                print(f"  ⏳ {name} {a['type']} 冷却中，跳过")
-        if new_alerts and can_push:
+                print(f"  ⏳ {name} {a['type']} 冷却中（1h内），跳过")
+        if new_alerts and push_cooldown_ok():
             print(f"\n📤 高分预警，推送简报 ({len(new_alerts)}/{len(alerts)}个)...")
             pushed = send_high_alert(new_alerts, now_str)
             if pushed:
-                save_cooldown()
+                global_ts = time.time()
                 for a in new_alerts:
-                    save_symbol_cooldown(a["symbol"], a["type"])
+                    sym_cooldowns[f"{a['symbol']}_{a['type']}"] = time.time()
+        elif new_alerts and not push_cooldown_ok():
+            print(f"\n⏳ 全局冷却中（1h内），{len(new_alerts)}个预警暂不推送")
     else:
         reason = "夜间/非整点" if not is_full_push else "无预警"
         print(f"\n📄 仅记录CSV ({reason})")
+
+    # 持久化冷却状态
+    now_ts = time.time()
+    sym_cooldowns = {k: v for k, v in sym_cooldowns.items() if now_ts - v < COOLDOWN_SECONDS}
+    save_cooldown_state(global_ts, sym_cooldowns)
     
     log_file = os.path.join(PROJECT_ROOT, "monitor_log.txt")
     status = "FULL" if is_full_push else ("ALERT" if alerts else "CSV")
