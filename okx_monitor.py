@@ -604,6 +604,8 @@ def scan_symbol(sym):
         bolls[tf_label] = boll_dir
         macds[tf_label] = round(macd_val, 4) if macd_val is not None else None
         time.sleep(0.15)
+    # 1D方向改用摆动点（价格跌破前低比DMI更可靠）
+    trends["1D"] = trends_sw["1D"] if trends_sw.get("1D", "N/A") != "N/A" else trends["1D"]
     (dmi_b, dmi_s), (adx_b, adx_s), (sw_b, sw_s) = calc_multi_score(trends, trends_sw, srsis, adxs)
     row["trends"] = trends; row["trends_sw"] = trends_sw
     row["srsis"] = srsis; row["adxs"] = adxs
