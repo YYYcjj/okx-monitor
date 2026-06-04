@@ -291,7 +291,7 @@ SYMBOLS = [
     "APT-USDT-SWAP", "HOME-USDT-SWAP", "WLD-USDT-SWAP", "BTC-USDT-SWAP",
     "HUMA-USDT-SWAP", "HMSTR-USDT-SWAP", "PUMP-USDT-SWAP", "ORDI-USDT-SWAP"
 ]
-ALERT_THRESHOLD = 10
+ALERT_THRESHOLD = 8
 
 # ── 项目根目录 ──
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
