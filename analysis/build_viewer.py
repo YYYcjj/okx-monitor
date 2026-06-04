@@ -986,6 +986,14 @@ async function scanAllSymbols(){{
     <th style="padding:6px 4px;text-align:center;color:#e74c3c">空</th>
     <th style="padding:6px 4px;text-align:center">净值</th>
   </tr>`;
+  // BTC 置顶，其余按净值降序
+  allResults.sort((a,b) => {{
+    let aBTC = a.symbol==='BTC' ? 0 : 1, bBTC = b.symbol==='BTC' ? 0 : 1;
+    if (aBTC !== bBTC) return aBTC - bBTC;
+    let aNet = Math.abs((a.bull||0)-(a.bear||0)), bNet = Math.abs((b.bull||0)-(b.bear||0));
+    return bNet - aNet;
+  }});
+
   for(let r of allResults){{
     let alert = (r.bull||0)>=ALERT_THR||(r.bear||0)>=ALERT_THR;
     let bg = alert?'#fff5f5':'';
