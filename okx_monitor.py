@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 
 # ── 内联指标库 ──
 OKX_BASE = "https://www.okx.com"
-DIR_SCORE = {"1H": 1, "4H": 1, "1D": 2}
+DIR_SCORE = {"1H": 1, "4H": 2, "1D": 4}
 # ── 数据获取 ──
 def fetch_ohlcv(symbol, bar, limit=200, retries=3):
     url = f"{OKX_BASE}/api/v5/market/candles"
@@ -166,10 +166,10 @@ def calc_multi_score(trends_dmi, trends_sw, srsis, adxs):
             if d == "多": bull += w
             elif d == "空": bear += w
             if s is not None:
-                if s < 20: bull += 2 if tf == "1D" else DIR_SCORE[tf]
-                elif s < 30 and tf == "1D": bull += 1
-                if s > 80: bear += 2 if tf == "1D" else DIR_SCORE[tf]
-                elif s > 70 and tf == "1D": bear += 1
+                if s < 20: bull += DIR_SCORE[tf]
+                elif s < 30 and tf == "1D": bull += 2
+                if s > 80: bear += DIR_SCORE[tf]
+                elif s > 70 and tf == "1D": bear += 2
         return round(bull, 1), round(bear, 1)
     dmi_b, dmi_s = score_one(trends_dmi)
     adx_b, adx_s = score_one(trends_dmi, weight_fn=True)
@@ -183,10 +183,10 @@ def calc_score(trends, srsis, adx_values):
         if d == "多": bull += w
         elif d == "空": bear += w
         if s is not None:
-            if s < 20: bull += 2 if tf == "1D" else w
-            elif s < 30 and tf == "1D": bull += 1
-            if s > 80: bear += 2 if tf == "1D" else w
-            elif s > 70 and tf == "1D": bear += 1
+            if s < 20: bull += w
+            elif s < 30 and tf == "1D": bull += 2
+            if s > 80: bear += w
+            elif s > 70 and tf == "1D": bear += 2
     return bull, bear
 
 def adx_weight(adx):
