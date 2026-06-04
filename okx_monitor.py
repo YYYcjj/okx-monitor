@@ -465,17 +465,18 @@ def _send_pushplus_full(results, now_str):
             if r.get("bear",0) >= ALERT_THRESHOLD: htm += f'<p style="margin:2px 0;font-size:14px">🔴 <b>{nm}</b> 空分={r["bear"]}</p>'
         htm += '<hr style="border:0;border-top:1px solid #eee;margin:8px 0">'
     htm += '<table style="width:100%;border-collapse:collapse;font-size:12px">'
-    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666"><td style="padding:5px 3px">币种</td><td style="padding:5px 1px;text-align:center">1H</td><td style="padding:5px 1px;text-align:center">4H</td><td style="padding:5px 1px;text-align:center">1D</td><td style="padding:5px 1px;text-align:center;color:#3498db">1H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">4H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">1D SRSI</td><td style="padding:5px 1px;text-align:center;color:#e67e22">CCI</td><td style="padding:5px 1px;text-align:center;color:#8e44ad">BB%</td><td style="padding:5px 2px;text-align:center;color:#27ae60">多</td><td style="padding:5px 2px;text-align:center;color:#e74c3c">空</td><td style="padding:5px 2px;text-align:center;color:#333">净值</td></tr>'
-    for i,r in enumerate(results):
+    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666"><td style="padding:5px 3px">币种</td><td style="padding:5px 1px;text-align:center">1H</td><td style="padding:5px 1px;text-align:center">4H</td><td style="padding:5px 1px;text-align:center">1D</td><td style="padding:5px 1px;text-align:center;color:#3498db">1H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">4H SRSI</td><td style="padding:5px 1px;text-align:center;color:#3498db">1D SRSI</td><td style="padding:5px 2px;text-align:center;color:#27ae60">多</td><td style="padding:5px 2px;text-align:center;color:#e74c3c">空</td><td style="padding:5px 2px;text-align:center;color:#333">净值</td></tr>'
+    # BTC 置顶，其余按净值降序
+    display = sorted(results, key=lambda r: (
+        0 if "BTC" in r.get("symbol","").upper() else 1,
+        -(abs(r.get("bull",0)-r.get("bear",0)))
+    ))
+    for i,r in enumerate(display):
         if "_error" in r: continue
         bg = "#fff" if i%2==0 else "#fafbfc"
+        is_btc = "BTC" in r["symbol"].upper()
         nm = r["symbol"].replace("-SWAP","").replace("-USDT","")
         t = r["trends"]; s = r["srsis"]
-        cc = r.get("ccis", {}); bb = r.get("bbps", {})
-        cc1h = f"{cc.get('1H'):.0f}" if cc.get('1H') is not None else "N/A"
-        bb1h = f"{bb.get('1H'):.2f}" if bb.get('1H') is not None else "N/A"
-        cc_color = "#e74c3c" if isinstance(cc.get('1H'), (int,float)) and cc['1H'] > 100 else ("#27ae60" if isinstance(cc.get('1H'), (int,float)) and cc['1H'] < -100 else "#333")
-        bb_color = "#e74c3c" if isinstance(bb.get('1H'), (int,float)) and bb['1H'] > 0.7 else ("#27ae60" if isinstance(bb.get('1H'), (int,float)) and bb['1H'] < 0.3 else "#333")
         alert = r["bull"]>=ALERT_THRESHOLD or r["bear"]>=ALERT_THRESHOLD
         bd = "border-left:3px solid #e74c3c;" if alert else ""
         be_ = "🟢" if r["bull"]>=ALERT_THRESHOLD else ""
@@ -488,12 +489,13 @@ def _send_pushplus_full(results, now_str):
             net_str = f"空+{net}"; net_color = "#e74c3c"
         else:
             net_str = "0"; net_color = "#999"
-        htm += f'<tr style="background:{bg};{bd}"><td style="padding:5px 3px;font-weight:bold">{nm}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1H"],"#999")};font-weight:bold;font-size:11px">{t["1H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["4H"],"#999")};font-weight:bold;font-size:11px">{t["4H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1D"],"#999")};font-weight:bold;font-size:11px">{t["1D"]}</td><td style="padding:5px 1px;text-align:center;color:{c1h};font-weight:{w1h}">{s1h}</td><td style="padding:5px 1px;text-align:center;color:{c4h};font-weight:{w4h}">{s4h}</td><td style="padding:5px 1px;text-align:center;color:{c1d};font-weight:{w1d}">{s1d}</td><td style="padding:5px 1px;text-align:center;color:{cc_color};font-size:11px">{cc1h}</td><td style="padding:5px 1px;text-align:center;color:{bb_color};font-size:11px">{bb1h}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:{net_color}">{net_str}</td></tr>'
+        sep = '<hr style="border:0;border-top:2px solid #3498db;margin:4px 0">' if (is_btc and i < len(display)-1 and not "BTC" in display[i+1]["symbol"].upper()) else ""
+        htm += f'<tr style="background:{bg};{bd}"><td style="padding:5px 3px;font-weight:bold">{nm}{" 📊" if is_btc else ""}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1H"],"#999")};font-weight:bold;font-size:11px">{t["1H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["4H"],"#999")};font-weight:bold;font-size:11px">{t["4H"]}</td><td style="padding:5px 1px;text-align:center;color:{dcol.get(t["1D"],"#999")};font-weight:bold;font-size:11px">{t["1D"]}</td><td style="padding:5px 1px;text-align:center;color:{c1h};font-weight:{w1h}">{s1h}</td><td style="padding:5px 1px;text-align:center;color:{c4h};font-weight:{w4h}">{s4h}</td><td style="padding:5px 1px;text-align:center;color:{c1d};font-weight:{w1d}">{s1d}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td><td style="padding:5px 2px;text-align:center;font-weight:bold;color:{net_color}">{net_str}</td></tr>'
     htm += '</table>'
     htm += '<div style="margin-top:10px"><p style="font-size:11px;font-weight:bold;color:#666;margin:0 0 4px">📊 多标准评分对比</p>'
     htm += '<table style="width:100%;border-collapse:collapse;font-size:11px">'
     htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666"><td style="padding:4px 3px">币种</td><td style="padding:4px 2px;text-align:center">DMI纯分</td><td style="padding:4px 2px;text-align:center">ADX加权</td><td style="padding:4px 2px;text-align:center">摆动点</td></tr>'
-    for i,r in enumerate(results):
+    for i,r in enumerate(display):
         if "_error" in r: continue
         bg = "#fff" if i%2==0 else "#fafbfc"
         nm = r["symbol"].replace("-SWAP","").replace("-USDT","")
