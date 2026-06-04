@@ -188,6 +188,17 @@ tr.win-4h{{background:#f0fff0}}
 .cat-bar{{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px}}
 .cat-bar .cb-fill{{height:22px;border-radius:4px;transition:width .3s}}
 .cat-bar .cb-num{{min-width:50px;text-align:right;font-weight:bold;font-size:13px}}
+/* Live test */
+.live-card{{background:#fff;border-radius:8px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.08)}}
+.live-card h3{{font-size:14px;margin:0 0 8px;color:#2c3e50}}
+.live-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}}
+.live-cell{{padding:8px 10px;border-radius:6px;background:#f8f9fb;font-size:12px}}
+.live-cell .lc-label{{font-size:10px;color:#999;margin-bottom:2px}}
+.live-cell .lc-val{{font-size:16px;font-weight:bold}}
+.live-score{{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}}
+.live-score-box{{padding:10px 16px;border-radius:8px;text-align:center;min-width:100px}}
+.live-score-box .ls-num{{font-size:28px;font-weight:bold}}
+.live-score-box .ls-label{{font-size:10px;color:#888;margin-top:2px}}
 </style>
 </head>
 <body>
@@ -199,6 +210,7 @@ tr.win-4h{{background:#f0fff0}}
   <button class="tab" onclick="switchTab('scan')">📡 实时扫描</button>
   <button class="tab" onclick="switchTab('pairwise')">🔗 组合胜率</button>
   <button class="tab" onclick="switchTab('backtest')">🔬 回测结果</button>
+  <button class="tab" onclick="switchTab('live')">🧪 实时测试</button>
 </div>
 
 <!-- Trade Analysis Section -->
@@ -280,7 +292,20 @@ tr.win-4h{{background:#f0fff0}}
   <div class="empty" id="pwEmpty">暂无组合胜率数据，请运行 python analysis/pairwise_winrate.py</div>
 </div>
 
-<!-- Backtest Section -->
+<!-- Live Test Section -->
+<div class="section" id="liveSection">
+  <div class="test-input" style="background:#fff;border-radius:8px;padding:14px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:14px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input id="liveSymbol" placeholder="币种代码 (如 BTC, ETH, APT)" style="padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;width:200px">
+      <button onclick="runLiveTest()" style="padding:8px 20px;background:#27ae60;color:#fff;border:0;border-radius:6px;font-size:14px;cursor:pointer;font-weight:bold">🚀 测试</button>
+      <button onclick="document.getElementById('liveSymbol').value='';document.getElementById('liveResults').innerHTML=''" style="padding:8px 14px;background:#e0e0e0;color:#555;border:0;border-radius:6px;font-size:13px;cursor:pointer">清除</button>
+      <span style="font-size:12px;color:#999">自动补 -USDT-SWAP，下拉选品种</span>
+    </div>
+    <div id="liveSymbols" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px"></div>
+  </div>
+  <div id="liveStatus" style="font-size:12px;color:#999;margin-bottom:8px"></div>
+  <div id="liveResults"></div>
+</div>
 <div class="section" id="backtestSection">
   <div class="toolbar" id="btToolbar">
     <input id="btSymbol" placeholder="币种筛选" oninput="deferFilter('bt')">
@@ -317,7 +342,7 @@ let scanRows=[], btRows=[], activeScanFile='', activeTab='scan';
 let sortState={{scan:{{col:'',dir:1}},bt:{{col:'',dir:1}}}};
 let filterTimers={{}};
 
-// ── Tab switching ──
+// ── Switch tab ──
 function switchTab(tab){{
   activeTab=tab;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',false));
@@ -325,7 +350,8 @@ function switchTab(tab){{
   if(tab==='trade'){{document.querySelector('.tabs .tab:nth-child(1)').classList.add('active');document.getElementById('tradeSection').classList.add('show');initTrade();}}
   else if(tab==='scan'){{document.querySelector('.tabs .tab:nth-child(2)').classList.add('active');document.getElementById('scanSection').classList.add('show');if(!activeScanFile)initScan();}}
   else if(tab==='pairwise'){{document.querySelector('.tabs .tab:nth-child(3)').classList.add('active');document.getElementById('pairwiseSection').classList.add('show');initPairwise();}}
-  else{{document.querySelector('.tabs .tab:nth-child(4)').classList.add('active');document.getElementById('backtestSection').classList.add('show');if(!btRows.length)initBacktest();}}
+  else if(tab==='backtest'){{document.querySelector('.tabs .tab:nth-child(4)').classList.add('active');document.getElementById('backtestSection').classList.add('show');if(!btRows.length)initBacktest();}}
+  else if(tab==='live'){{document.querySelector('.tabs .tab:nth-child(5)').classList.add('active');document.getElementById('liveSection').classList.add('show');initLiveTest();}}
 }}
 
 // ── Scan init ──
@@ -748,6 +774,262 @@ function renderTradeExamples(){{
     }});
     document.getElementById(id).innerHTML=h;
   }}
+}}
+
+// ── Live Test ──
+const DIR_SCORE = {{'1H':1,'4H':2,'1D':3}};
+const ALERT_THR = 10;
+const FIXED_SYMBOLS = ['BTC','ETH','APT','HOME','WLD','HUMA','HMSTR','PUMP','ORDI','SOL','DOGE','ENA','GMT','MOVE','BERA','IP','LINK','SUI','AVAX','XRP'];
+
+async function fetchOHLCV(sym, bar, limit=200){{
+  const url = `https://www.okx.com/api/v5/market/candles?instId=${{encodeURIComponent(sym)}}&bar=${{bar}}&limit=${{limit}}`;
+  const resp = await fetch(url);
+  const data = await resp.json();
+  if(data.code!=='0'||!data.data) return [];
+  return data.data.map(c=>({{h:+c[2],l:+c[3],c:+c[4]}})).reverse();
+}}
+
+function calcRSI(closes, period=14){{
+  if(closes.length<period+1) return null;
+  let gains=[], losses=[];
+  for(let i=1;i<closes.length;i++){{let d=closes[i]-closes[i-1];gains.push(Math.max(d,0));losses.push(Math.max(-d,0));}}
+  let ag=0,al=0;
+  for(let i=0;i<period;i++){{ag+=gains[i];al+=losses[i];}}
+  ag/=period;al/=period;
+  let rsiVals=[al===0?100:100-100/(1+ag/al)];
+  for(let i=period;i<gains.length;i++){{ag=(ag*(period-1)+gains[i])/period;al=(al*(period-1)+losses[i])/period;rsiVals.push(al===0?100:100-100/(1+ag/al));}}
+  return rsiVals;
+}}
+
+function calcStochRSI(closes){{
+  const rsiVals = calcRSI(closes,14);
+  if(!rsiVals||rsiVals.length<17) return null;
+  let kRaw=[];
+  for(let i=13;i<rsiVals.length;i++){{let w=rsiVals.slice(i-13,i+1);let lo=Math.min(...w),hi=Math.max(...w);kRaw.push(hi===lo?50:(rsiVals[i]-lo)/(hi-lo)*100);}}
+  let kVals=[];
+  for(let i=2;i<kRaw.length;i++){{kVals.push((kRaw[i-2]+kRaw[i-1]+kRaw[i])/3);}}
+  if(kVals.length<4) return kVals[kVals.length-1];
+  let d=(kVals[kVals.length-3]+kVals[kVals.length-2]+kVals[kVals.length-1])/3;
+  return (kVals[kVals.length-1]+d)/2;
+}}
+
+function calcATR(candles, period=14){{
+  if(candles.length<period+1) return null;
+  let tr=[0];
+  for(let i=1;i<candles.length;i++){{let h=candles[i].h,l=candles[i].l,pc=candles[i-1].c;tr.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)));}}
+  let atr=0;for(let i=1;i<=period;i++) atr+=tr[i];
+  atr/=period;
+  for(let i=period+1;i<candles.length;i++) atr=(atr*(period-1)+tr[i])/period;
+  return atr;
+}}
+
+function trendDMI(candles, period=14){{
+  let n=candles.length;
+  if(n<period+1) return {{d:'N/A',adx:null}};
+  let highs=candles.map(c=>c.h), lows=candles.map(c=>c.l), closes=candles.map(c=>c.c);
+  let tr=new Array(n).fill(0);
+  for(let i=1;i<n;i++) tr[i]=Math.max(highs[i]-lows[i],Math.abs(highs[i]-closes[i-1]),Math.abs(lows[i]-closes[i-1]));
+  let pdm=new Array(n).fill(0), mdm=new Array(n).fill(0);
+  for(let i=1;i<n;i++){{let up=highs[i]-highs[i-1],down=lows[i-1]-lows[i];if(up>down&&up>0)pdm[i]=up;if(down>up&&down>0)mdm[i]=down;}}
+  let atrS=0,sp=0,sm=0;
+  for(let i=1;i<=period;i++){{atrS+=tr[i];sp+=pdm[i];sm+=mdm[i];}}
+  atrS/=period;sp/=period;sm/=period;
+  let dxs=[];
+  for(let i=period+1;i<n;i++){{atrS=(atrS*(period-1)+tr[i])/period;sp=(sp*(period-1)+pdm[i])/period;sm=(sm*(period-1)+mdm[i])/period;let pdi=atrS>0?sp/atrS*100:0,mdi=atrS>0?sm/atrS*100:0,sum=pdi+mdi;dxs.push(sum>0?Math.abs(pdi-mdi)/sum*100:0);}}
+  if(dxs.length<period) return {{d:'N/A',adx:null}};
+  let adx=0;for(let i=0;i<period;i++) adx+=dxs[i];
+  adx/=period;
+  for(let i=period;i<dxs.length;i++) adx=(adx*(period-1)+dxs[i])/period;
+  let pdi=atrS>0?sp/atrS*100:0,mdi=atrS>0?sm/atrS*100:0;
+  return {{d:pdi>mdi?'多':'空',adx:adx}};
+}}
+
+function trendSwing(candles){{
+  if(candles.length<30) return 'N/A';
+  let atr=calcATR(candles);
+  if(atr===null) return 'N/A';
+  let sh=[],sl=[];
+  for(let i=2;i<candles.length-2;i++){{let h=candles[i].h,l=candles[i].l;if(h>=candles[i-1].h&&h>=candles[i-2].h&&h>=candles[i+1].h&&h>=candles[i+2].h)sh.push(h);if(l<=candles[i-1].l&&l<=candles[i-2].l&&l<=candles[i+1].l&&l<=candles[i+2].l)sl.push(l);}}
+  if(sh.length<2||sl.length<2) return 'N/A';
+  let h2=sh[sh.length-2],h1=sh[sh.length-1],l2=sl[sl.length-2],l1=sl[sl.length-1];
+  let up=h1>h2, lo=l1>=l2-atr;
+  if(up&&lo) return '多';
+  if(!up&&!lo) return '空';
+  return lo?'多':'空';
+}}
+
+function calcEMA(closes, period){{
+  if(closes.length<period) return null;
+  let k=2/(period+1), ema=closes.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  for(let i=period;i<closes.length;i++) ema=closes[i]*k+ema*(1-k);
+  return ema;
+}}
+
+function calcCCI(candles, period=20){{
+  if(candles.length<period) return null;
+  let tp=candles.map(c=>(c.h+c.l+c.c)/3), w=tp.slice(-period), sma=w.reduce((a,b)=>a+b,0)/period;
+  let mad=w.reduce((a,b)=>a+Math.abs(b-sma),0)/period;
+  return mad===0?0:(tp[tp.length-1]-sma)/(0.015*mad);
+}}
+
+function calcBollinger(closes, period=20){{
+  if(closes.length<period) return null;
+  let w=closes.slice(-period), mid=w.reduce((a,b)=>a+b,0)/period;
+  let vari=w.reduce((a,b)=>a+(b-mid)**2,0)/period, std=Math.sqrt(vari);
+  let upper=mid+2*std, lower=mid-2*std, last=closes[closes.length-1];
+  return {{mid,upper,lower,bw:(upper-lower)/mid*100,bpct:(last-lower)/(upper-lower)}};
+}}
+
+function trendEMACross(candles,fast=12,slow=26){{
+  let closes=candles.map(c=>c.c), ef=calcEMA(closes,fast), es=calcEMA(closes,slow);
+  if(ef===null||es===null) return 'N/A';
+  return ef>es?'多':'空';
+}}
+
+function trendBollinger(candles){{
+  let closes=candles.map(c=>c.c), bb=calcBollinger(closes);
+  if(!bb) return 'N/A';
+  let last=closes[closes.length-1];
+  if(last>bb.upper) return '空';
+  if(last<bb.lower) return '多';
+  if(bb.bpct>0.7) return '空';
+  if(bb.bpct<0.3) return '多';
+  return 'N/A';
+}}
+
+function trendCCI(candles){{
+  let cci=calcCCI(candles);
+  if(cci===null) return 'N/A';
+  if(cci>100) return '空';
+  if(cci<-100) return '多';
+  return cci>0?'多':'空';
+}}
+
+function calcScore(trends, srsis){{
+  let bull=0, bear=0;
+  for(let tf of ['1H','4H','1D']){{
+    let d=trends[tf], s=srsis[tf], w=DIR_SCORE[tf];
+    if(d==='多') bull+=w; else if(d==='空') bear+=w;
+    if(s!==null){{
+      if(s<20) bull+=w;
+      else if(s<30&&tf==='1D') bull+=2;
+      if(s>80) bear+=w;
+      else if(s>70&&tf==='1D') bear+=2;
+    }}
+  }}
+  return {{bull, bear}};
+}}
+
+async function runLiveTest(){{
+  const input = document.getElementById('liveSymbol').value.trim().toUpperCase();
+  if(!input){{document.getElementById('liveStatus').innerHTML='<span style="color:#e74c3c">请输入币种代码</span>';return;}}
+  const sym = input.endsWith('-USDT-SWAP') ? input : (input.endsWith('-USDT') ? input+'-SWAP' : input+'-USDT-SWAP');
+  document.getElementById('liveSymbol').value = sym;
+  document.getElementById('liveStatus').innerHTML=`<span style="color:#3498db">⏳ 正在获取 ${{sym}} 数据...</span>`;
+  document.getElementById('liveResults').innerHTML = '';
+
+  let results={{}};
+  for(let bar of ['1H','4H','1D']){{
+    try{{
+      let candles = await fetchOHLCV(sym, bar==='1D'?'1Dutc':bar, bar==='1D'?200:200);
+      if(!candles||candles.length<20){{results[bar]={{error:'数据不足'}};continue;}}
+      let closes = candles.map(c=>c.c);
+      let dmi = trendDMI(candles);
+      let sw = bar==='1D'?trendSwing(candles):dmi.d;
+      let srsi = calcStochRSI(closes);
+      let adx = dmi.adx;
+      let ema = trendEMACross(candles);
+      let cci = calcCCI(candles);
+      let cci_dir = trendCCI(candles);
+      let bb = calcBollinger(closes);
+      let boll_dir = trendBollinger(candles);
+      results[bar] = {{
+        dmi:dmi.d, swing:sw, srsi:srsi!==null?+srsi.toFixed(1):null, adx:adx!==null?+adx.toFixed(1):null,
+        ema, cci:cci!==null?Math.round(cci):null, cci_dir, bb_pct:bb?+bb.bpct.toFixed(2):null, boll_dir
+      }};
+    }}catch(e){{results[bar]={{error:e.message}};}}
+  }}
+
+  // Compute scores using swing for 1D
+  let trends={{}}, srsis={{}};
+  for(let bar of ['1H','4H','1D']){{
+    if(results[bar]&&!results[bar].error){{
+      trends[bar] = bar==='1D' ? results[bar].swing : results[bar].dmi;
+      srsis[bar] = results[bar].srsi;
+    }}else{{trends[bar]='N/A';srsis[bar]=null;}}
+  }}
+  let dmiTrends={{}};
+  for(let bar of ['1H','4H','1D']) dmiTrends[bar]=results[bar]&&!results[bar].error?results[bar].dmi:'N/A';
+  let score = calcScore(trends, srsis);
+  
+  document.getElementById('liveStatus').innerHTML = `<span style="color:#27ae60">✅ ${{sym}} 指标已获取</span>`;
+  
+  // Render
+  let h = '<div class="live-card"><h3>📊 指标数值</h3><div class="live-grid">';
+  const tfs = ['1H','4H','1D'];
+  const tfLabels = {{'1H':'1小时','4H':'4小时','1D':'日线'}};
+  for(let tf of tfs){{
+    let r = results[tf];
+    if(!r||r.error){{h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}}</div><div class="lc-val" style="color:#e74c3c">获取失败</div></div>`;continue;}}
+    h+=`<div class="live-cell">
+      <div class="lc-label">${{tfLabels[tf]}} 方向</div>
+      <div class="lc-val" style="color:${{r.dmi==='多'?'#27ae60':r.dmi==='空'?'#e74c3c':'#999'}}">${{r.dmi}}${{tf==='1D'?'<span style="font-size:10px;color:#888">(摆动)</span>':''}}</div>
+    </div>`;
+    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} StochRSI</div><div class="lc-val" style="color:${{r.srsi!==null?(r.srsi>80?'#e74c3c':r.srsi<20?'#27ae60':'#333'):'#999'}}">${{r.srsi!==null?r.srsi:'N/A'}}</div></div>`;
+    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} ADX</div><div class="lc-val">${{r.adx!==null?r.adx:'N/A'}}</div></div>`;
+    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} CCI</div><div class="lc-val" style="color:${{r.cci!==null?(r.cci>100?'#e74c3c':r.cci<-100?'#27ae60':'#333'):'#999'}}">${{r.cci!==null?r.cci:'N/A'}}</div></div>`;
+    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} BB%</div><div class="lc-val" style="color:${{r.bb_pct!==null?(r.bb_pct>0.7?'#e74c3c':r.bb_pct<0.3?'#27ae60':'#333'):'#999'}}">${{r.bb_pct!==null?r.bb_pct:'N/A'}}</div></div>`;
+    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} EMA</div><div class="lc-val" style="color:${{r.ema==='多'?'#27ae60':r.ema==='空'?'#e74c3c':'#999'}}">${{r.ema}}</div></div>`;
+    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} 摆动点</div><div class="lc-val" style="color:${{r.swing==='多'?'#27ae60':r.swing==='空'?'#e74c3c':'#999'}}">${{r.swing}}</div></div>`;
+    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} BOLL方向</div><div class="lc-val" style="color:${{r.boll_dir==='多'?'#27ae60':r.boll_dir==='空'?'#e74c3c':'#999'}}">${{r.boll_dir}}</div></div>`;
+    h+=`<div class="live-cell"><div class="lc-label">${{tfLabels[tf]}} CCI方向</div><div class="lc-val" style="color:${{r.cci_dir==='多'?'#27ae60':r.cci_dir==='空'?'#e74c3c':'#999'}}">${{r.cci_dir}}</div></div>`;
+  }}
+  h+='</div></div>';
+
+  // Score cards
+  let net = Math.abs(score.bull-score.bear);
+  let netStr = score.bull>score.bear?`多+${{net}}`:score.bear>score.bull?`空+${{net}}`:'0';
+  let bullAlert = score.bull>=ALERT_THR;
+  let bearAlert = score.bear>=ALERT_THR;
+  h+=`<div class="live-card"><h3>🎯 评分结果 (阈值≥${{ALERT_THR}})</h3><div class="live-score">`;
+  h+=`<div class="live-score-box" style="background:${{bullAlert?'#eafaf1':'#f8f9fb'}}"><div class="ls-num" style="color:${{bullAlert?'#27ae60':'#999'}}">${{score.bull}}${{bullAlert?' ⚠️':''}}</div><div class="ls-label">多方评分</div></div>`;
+  h+=`<div class="live-score-box" style="background:${{bearAlert?'#fdf0f0':'#f8f9fb'}}"><div class="ls-num" style="color:${{bearAlert?'#e74c3c':'#999'}}">${{score.bear}}${{bearAlert?' ⚠️':''}}</div><div class="ls-label">空方评分</div></div>`;
+  h+=`<div class="live-score-box" style="background:#f8f9fb"><div class="ls-num" style="color:${{net>0?(score.bull>score.bear?'#27ae60':'#e74c3c'):'#999'}}">${{netStr}}</div><div class="ls-label">净值</div></div>`;
+  h+=`<div class="live-score-box" style="background:#f8f9fb"><div class="ls-label">方向</div><div class="lc-val" style="font-size:14px">${{score.bull>score.bear?'🟢 偏多':score.bear>score.bull?'🔴 偏空':'➖ 中性'}}</div></div>`;
+  h+='</div></div>';
+
+  // Direction detail
+  h+=`<div class="live-card"><h3>📋 评分明细</h3>`;
+  h+=`<table style="width:100%;font-size:12px;border-collapse:collapse">`;
+  h+=`<tr style="background:#f0f1f5;font-weight:bold;color:#666"><td>周期</td><td>方向</td><td>权重分</td><td>SRSI</td><td>极端加分</td><td>柔和加分</td></tr>`;
+  for(let tf of tfs){{
+    let d = trends[tf]; let s = srsis[tf]; let w = DIR_SCORE[tf];
+    let dirScore = d==='多'?w:(d==='空'?-w:0);
+    let extremeBonus = 0;
+    if(s!==null){{if(s<20)extremeBonus=w;else if(s>80)extremeBonus=-w;}}
+    let mildBonus = 0;
+    if(tf==='1D'&&s!==null){{if(s<30)mildBonus=2;else if(s>70)mildBonus=-2;}}
+    let cl = dirScore>0?'#27ae60':dirScore<0?'#e74c3c':'#999';
+    let ecl = extremeBonus>0?'#27ae60':extremeBonus<0?'#e74c3c':'#999';
+    let mcl = mildBonus>0?'#27ae60':mildBonus<0?'#e74c3c':'#999';
+    h+=`<tr><td style="padding:4px 6px;font-weight:bold">${{tf}}</td>`;
+    h+=`<td style="padding:4px 6px;color:${{cl}};font-weight:bold">${{d}}${{dirScore>0?' +'+dirScore:dirScore<0?' '+dirScore:' 0'}}</td>`;
+    h+=`<td style="padding:4px 6px">${{w}}</td>`;
+    h+=`<td style="padding:4px 6px">${{s!==null?s:'N/A'}}</td>`;
+    h+=`<td style="padding:4px 6px;color:${{ecl}};font-weight:bold">${{extremeBonus!==0?(extremeBonus>0?'+':'')+extremeBonus:'0'}}</td>`;
+    h+=`<td style="padding:4px 6px;color:${{mcl}};font-weight:bold">${{mildBonus!==0?(mildBonus>0?'+':'')+mildBonus:'0'}}</td>`;
+    h+='</tr>';
+  }}
+  h+=`<tr style="background:#f0f1f5;font-weight:bold"><td colspan="4"></td><td style="padding:4px 6px;color:#27ae60">多方: ${{score.bull}}</td><td style="padding:4px 6px;color:#e74c3c">空方: ${{score.bear}}</td></tr>`;
+  h+='</table></div>';
+
+  document.getElementById('liveResults').innerHTML = h;
+}}
+
+function initLiveTest(){{
+  let chips = FIXED_SYMBOLS.map(s=>`<span class="file-chip" onclick="document.getElementById('liveSymbol').value='${{s}}';runLiveTest()" style="cursor:pointer">${{s}}</span>`).join('');
+  document.getElementById('liveSymbols').innerHTML = chips;
+  document.getElementById('liveSymbol').addEventListener('keydown', function(e){{if(e.key==='Enter') runLiveTest();}});
 }}
 
 // Init
