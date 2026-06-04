@@ -782,11 +782,23 @@ const ALERT_THR = 10;
 const FIXED_SYMBOLS = ['BTC','ETH','APT','HOME','WLD','HUMA','HMSTR','PUMP','ORDI','SOL','DOGE','ENA','GMT','MOVE','BERA','IP','LINK','SUI','AVAX','XRP'];
 
 async function fetchOHLCV(sym, bar, limit=200){{
-  const url = `https://www.okx.com/api/v5/market/candles?instId=${{encodeURIComponent(sym)}}&bar=${{bar}}&limit=${{limit}}`;
-  const resp = await fetch(url);
-  const data = await resp.json();
-  if(data.code!=='0'||!data.data) return [];
-  return data.data.map(c=>({{h:+c[2],l:+c[3],c:+c[4]}})).reverse();
+  const params = `instId=${{encodeURIComponent(sym)}}&bar=${{bar}}&limit=${{limit}}`;
+  const url = `https://www.okx.com/api/v5/market/candles?${{params}}`;
+  let resp;
+  try {{
+    resp = await fetch(url);
+    if(!resp.ok) throw new Error('direct failed');
+  }} catch(e) {{
+    // CORS from file:// → 走代理
+    const proxy = `https://api.allorigins.win/raw?url=${{encodeURIComponent(url)}}`;
+    resp = await fetch(proxy);
+  }}
+  const text = await resp.text();
+  try {{
+    const data = JSON.parse(text);
+    if(data.code!=='0'||!data.data) return [];
+    return data.data.map(c=>({{h:+c[2],l:+c[3],c:+c[4]}})).reverse();
+  }} catch(e) {{ return []; }}
 }}
 
 function calcRSI(closes, period=14){{
