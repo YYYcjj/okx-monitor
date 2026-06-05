@@ -523,7 +523,8 @@ def _send_pushplus_alert(alerts, now_str):
     for a in alerts:
         emoji = "🟢" if a["type"] == "多" else "🔴"
         name = a["symbol"].replace("-SWAP", "").replace("-USDT", "")
-        htm += f'<p style="margin:4px 0;font-size:15px;font-weight:bold">{emoji} {name} {a["type"]}分={a["score"]}</p>'
+        via_label = " [净值]" if a.get("via_net") else ""
+        htm += f'<p style="margin:4px 0;font-size:15px;font-weight:bold">{emoji} {name} {a["type"]}分={a["score"]}{via_label}</p>'
         htm += f'<p style="margin:1px 0;font-size:11px;color:#666">方向: {a.get("t_1h","")}/{a.get("t_4h","")}/{a.get("t_1d","")} | SRSI: {a.get("s_1h","")}/{a.get("s_4h","")}/{a.get("s_1d","")}</p>'
         net_str = f"多+{a['net']}" if a['bull'] > a['bear'] else (f"空+{a['net']}" if a['bear'] > a['bull'] else "0")
         htm += f'<p style="margin:1px 0;font-size:12px;color:#333">多{a["bull"]} · 空{a["bear"]} · 净值{net_str}</p>'
@@ -675,16 +676,24 @@ def main():
     for r in results:
         if r.get("_error"): continue
         t = r["trends"]; s = r["srsis"]
+        net = abs(r["bull"] - r["bear"])
         if r["bull"] >= ALERT_THRESHOLD:
             alerts.append({"type":"多","symbol":r["symbol"],"score":r["bull"],
                 "t_1h":t["1H"],"t_4h":t["4H"],"t_1d":t["1D"],
                 "s_1h":fmt_srsi(s["1H"]),"s_4h":fmt_srsi(s["4H"]),"s_1d":fmt_srsi(s["1D"]),
-                "bull":r["bull"],"bear":r["bear"],"net":abs(r["bull"]-r["bear"])})
+                "bull":r["bull"],"bear":r["bear"],"net":net})
         if r["bear"] >= ALERT_THRESHOLD:
             alerts.append({"type":"空","symbol":r["symbol"],"score":r["bear"],
                 "t_1h":t["1H"],"t_4h":t["4H"],"t_1d":t["1D"],
                 "s_1h":fmt_srsi(s["1H"]),"s_4h":fmt_srsi(s["4H"]),"s_1d":fmt_srsi(s["1D"]),
-                "bull":r["bull"],"bear":r["bear"],"net":abs(r["bull"]-r["bear"])})
+                "bull":r["bull"],"bear":r["bear"],"net":net})
+        # 净值>5 也算预警（多空分歧大，方向明确）
+        if net > 5 and r["bull"] < ALERT_THRESHOLD and r["bear"] < ALERT_THRESHOLD:
+            d = "多" if r["bull"] > r["bear"] else "空"
+            alerts.append({"type":d,"symbol":r["symbol"],"score":net,
+                "t_1h":t["1H"],"t_4h":t["4H"],"t_1d":t["1D"],
+                "s_1h":fmt_srsi(s["1H"]),"s_4h":fmt_srsi(s["4H"]),"s_1d":fmt_srsi(s["1D"]),
+                "bull":r["bull"],"bear":r["bear"],"net":net, "via_net":True})
     
     save_scan_csv(results, now)
     
