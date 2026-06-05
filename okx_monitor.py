@@ -612,6 +612,12 @@ def scan_symbol(sym):
         time.sleep(0.15)
     # 1D方向改用摆动点（价格跌破前低比DMI更可靠）
     trends["1D"] = trends_sw["1D"] if trends_sw.get("1D", "N/A") != "N/A" else trends["1D"]
+    # 趋势过滤：EMA空头排列 + 多数日线下跌 → 强制判空
+    if tf_label == "1D" and trends["1D"] == "多":
+        ema_1d = trend_ema_cross(candles)
+        bearish_days = sum(1 for i in range(max(0, len(closes)-10), len(closes)) if closes[i] < closes[i-1]) if len(closes) > 10 else 0
+        if ema_1d == "空" and bearish_days >= 7:
+            trends["1D"] = "空"
     (dmi_b, dmi_s), (adx_b, adx_s), (sw_b, sw_s) = calc_multi_score(trends, trends_sw, srsis, adxs)
     row["trends"] = trends; row["trends_sw"] = trends_sw
     row["srsis"] = srsis; row["adxs"] = adxs

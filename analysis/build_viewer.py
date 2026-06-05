@@ -952,6 +952,13 @@ async function scanAllSymbols(){{
           let swingCandles = bar==='1D'?candles.slice(-60):candles;
           let sw = bar==='1D'?trendSwing(swingCandles):dmi.d;
           let dir = bar==='1D'?sw:dmi.d;
+          // 趋势过滤：EMA空头 + 近10日7日下跌 → 强制空
+          if(bar==='1D' && dir==='多'){{
+            let ema1d = trendEMACross(candles);
+            let bearish = 0;
+            for(let i=Math.max(0,closes.length-10); i<closes.length; i++) if(closes[i]<closes[i-1]) bearish++;
+            if(ema1d==='空' && bearish>=7) dir='空';
+          }}
           let srsi = calcStochRSI(closes);
           res[bar] = {{dir, srsi:srsi!==null?+srsi.toFixed(1):null, dmi:dmi.d, swing:sw}};
         }}catch(e){{res[bar]={{error:true}};}}
