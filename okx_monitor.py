@@ -319,6 +319,77 @@ if os.path.exists(WEBHOOK_FILE):
 elif os.environ.get("WECOM_WEBHOOK"):
     WECOM_WEBHOOK = os.environ["WECOM_WEBHOOK"]
 
+# ── OKX API（用于拉取成交记录）──
+OKX_API_KEY = os.environ.get("OKX_API_KEY", "6d758f5a-4ea7-44d1-bc56-5b8659263b1a")
+OKX_SECRET = os.environ.get("OKX_SECRET", "760BEBD659B861D17B5DE6DF7112E5CF")
+OKX_PASSPHRASE = os.environ.get("OKX_PASSPHRASE", "1qaz2wsxcJJ!")
+import hmac as _hmac, base64 as _b64, hashlib as _hashlib
+
+def _okx_sign(ts, method, path, body=""):
+    return _b64.b64encode(_hmac.new(OKX_SECRET.encode(), (ts+method+path+body).encode(), _hashlib.sha256).digest()).decode()
+
+def _okx_req(method, path, params=None):
+    ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00","Z")
+    qs = "?" + "&".join(f"{k}={v}" for k,v in (params or {}).items()) if params else ""
+    h = {"OK-ACCESS-KEY":OKX_API_KEY,"OK-ACCESS-SIGN":_okx_sign(ts,method,path+qs),
+         "OK-ACCESS-TIMESTAMP":ts,"OK-ACCESS-PASSPHRASE":OKX_PASSPHRASE,"Content-Type":"application/json"}
+    for _ in range(3):
+        try:
+            r = requests.get(f"{OKX_BASE}{path}{qs}", headers=h, timeout=15)
+            return r.json()
+        except: time.sleep(1)
+    return {}
+
+def fetch_recent_trades(hours=4):
+    """拉取最近N小时的成交记录"""
+    end_ts = int(datetime.now(timezone.utc).timestamp()*1000)
+    begin_ts = int((datetime.now(timezone.utc) - timedelta(hours=hours)).timestamp()*1000)
+    trades = []
+    for sym in SYMBOLS:
+        data = _okx_req("GET", "/api/v5/trade/orders-history",
+            {"instType":"SWAP","instId":sym,"ordType":"market","state":"filled",
+             "begin":str(begin_ts),"end":str(end_ts),"limit":"20"})
+        if data.get("code")=="0" and data.get("data"):
+            for o in data["data"]:
+                trades.append({"sym":sym.replace("-USDT-SWAP",""),"time":o["cTime"],
+                    "side":o["side"],"px":float(o["avgPx"]),"sz":float(o["accFillSz"])})
+        time.sleep(0.15)
+    trades.sort(key=lambda x:x["time"])
+    return trades
+
+def save_trade_log(trades, results, now):
+    """将成交与当前扫描指标绑定，记录到 trade_log.csv"""
+    log_dir = os.path.join(PROJECT_ROOT, "okx_data")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "trade_log.csv")
+    
+    # 构建币种→指标映射
+    ind = {}
+    for r in results:
+        if "_error" in r: continue
+        nm = r["symbol"].replace("-USDT-SWAP","").replace("-USDT","").replace("-SWAP","")
+        t = r["trends"]; s = r["srsis"]
+        net = abs(r.get("bull",0)-r.get("bear",0))
+        ind[nm] = {"d1h":t.get("1H",""),"d4h":t.get("4H",""),"d1d":t.get("1D",""),
+            "s1h":s.get("1H"),"s4h":s.get("4H"),"s1d":s.get("1D"),
+            "bull":r.get("bull",0),"bear":r.get("bear",0),"net":net}
+    
+    file_exists = os.path.exists(log_file)
+    with open(log_file, 'a', newline='') as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["time","sym","side","px","sz","d1h","d4h","d1d",
+                "s1h","s4h","s1d","bull","bear","net","scan_time"])
+        for t in trades:
+            m = ind.get(t["sym"], {})
+            ts = datetime.fromtimestamp(int(t["time"])/1000, tz=timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+            writer.writerow([ts, t["sym"], t["side"], t["px"], t["sz"],
+                m.get("d1h",""),m.get("d4h",""),m.get("d1d",""),
+                m.get("s1h",""),m.get("s4h",""),m.get("s1d",""),
+                m.get("bull",""),m.get("bear",""),m.get("net",""),
+                now.strftime("%Y-%m-%d %H:%M")])
+    return len(trades)
+
 # ── CSV 文档存储 ──
 def save_scan_csv(results, now):
     data_dir = os.path.join(PROJECT_ROOT, "okx_data", "scans")
@@ -702,6 +773,12 @@ def main():
                 "bull":r["bull"],"bear":r["bear"],"net":net, "via_net":True})
     
     save_scan_csv(results, now)
+    
+    # 成交记录绑定
+    recent_trades = fetch_recent_trades(4)
+    if recent_trades:
+        n = save_trade_log(recent_trades, results, now)
+        print(f"  📊 成交绑定: {n} 笔")
     
     # 多空分开排序
     results.sort(key=lambda r: max(r.get("bull",0), r.get("bear",0)), reverse=True)
