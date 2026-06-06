@@ -49,3 +49,4 @@ github_key.pub
 
 # Tools cache
 tools/scan_history.json
+.alert_dedup.json

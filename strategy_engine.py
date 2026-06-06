@@ -36,6 +36,40 @@ with open(SYMBOLS_FILE) as f:
 PUSHPLUS_TOKEN = "68fb8af9e2764f5f9a3bb29ab1418cd3"
 PUSHPLUS_URL = "http://www.pushplus.plus/send"
 
+# 高分预警去重：同币种2小时内不重复推送
+ALERT_DEDUP_CACHE = WORKSPACE / ".alert_dedup.json"
+ALERT_DEDUP_HOURS = 2
+
+
+def _load_dedup():
+    if ALERT_DEDUP_CACHE.exists():
+        try:
+            with open(ALERT_DEDUP_CACHE) as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+
+def _save_dedup(cache):
+    with open(ALERT_DEDUP_CACHE, "w") as f:
+        json.dump(cache, f)
+
+
+def _should_alert(coin_key, direction):
+    """检查该币种+方向是否在2小时内已经推送过"""
+    cache = _load_dedup()
+    k = f"{coin_key}_{direction}"
+    if k in cache:
+        last_ts = cache[k]
+        now_ts = time.time()
+        if now_ts - last_ts < ALERT_DEDUP_HOURS * 3600:
+            return False
+    # 更新缓存
+    cache[k] = time.time()
+    _save_dedup(cache)
+    return True
+
 # 合约面值 (U本位)
 CT_VAL = {
     "BTC-USDT-SWAP": 0.01, "ETH-USDT-SWAP": 0.1, "SOL-USDT-SWAP": 1,
@@ -646,8 +680,6 @@ def push_scan_report(results, now_str):
     if not PUSHPLUS_TOKEN:
         return
 
-    alert_count = sum(1 for r in results if max(r["bull"], r["bear"]) >= ALERT_THRESHOLD)
-
     def sc(v):
         try:
             n = float(v)
@@ -669,6 +701,19 @@ def push_scan_report(results, now_str):
 
     # ── 高分预警详细区 ──
     alerts = [r for r in results if max(r["bull"], r["bear"]) >= ALERT_THRESHOLD]
+    # 去重：同币种+方向2小时内不重复推送
+    new_alerts = []
+    for r in alerts:
+        coin = r["symbol"].replace("-USDT-SWAP", "")
+        if r["bull"] >= ALERT_THRESHOLD:
+            if _should_alert(coin, "long"):
+                new_alerts.append(r)
+        if r["bear"] >= ALERT_THRESHOLD:
+            if _should_alert(coin, "short"):
+                new_alerts.append(r)
+    alerts = new_alerts
+    alert_count = len(alerts)
+    full_alerts = [r for r in results if max(r["bull"], r["bear"]) >= ALERT_THRESHOLD]  # 全量用于表格样式
     if alerts:
         htm += f'<div style="background:#fff3f0;padding:8px 10px;border-radius:6px;margin-bottom:10px;border-left:3px solid #e74c3c">'
         htm += f'<p style="color:#e74c3c;font-weight:bold;margin:0 0 6px;font-size:14px">⚠️ 高分预警（≥{ALERT_THRESHOLD}分）</p>'
