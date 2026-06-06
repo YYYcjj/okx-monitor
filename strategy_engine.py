@@ -24,7 +24,7 @@ POSITIONS_FILE = WORKSPACE / "positions.json"
 # 策略参数
 ST_PERIOD, ST_MULT = 10, 3
 NEAR_PCT = 0.005  # ±0.5%
-ALERT_THRESHOLD = 6
+ALERT_THRESHOLD = 9
 MAX_RISK_PCT = 0.02  # 每笔最大亏损2%
 
 # 14币种池
@@ -757,9 +757,11 @@ def push_scan_report(results, now_str):
     htm += '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px">'
     htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666">'
     htm += '<td style="padding:3px 2px">币种</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">1H</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">4H</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">1D</td>'
     htm += '<td style="padding:3px 1px;text-align:center">ST</td>'
     htm += '<td style="padding:3px 1px;text-align:center">距ST</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">SRSI</td>'
     htm += '<td style="padding:3px 1px;text-align:center;color:#27ae60">多</td>'
     htm += '<td style="padding:3px 1px;text-align:center;color:#e74c3c">空</td>'
     htm += '</tr>'
@@ -768,11 +770,6 @@ def push_scan_report(results, now_str):
         nm = r["symbol"].replace("-USDT-SWAP", "")
         alert_flag = max(r["bull"], r["bear"]) >= ALERT_THRESHOLD
         bd = "border-left:3px solid #e74c3c;" if alert_flag else ""
-
-        s1h, c1h, w1h = srf(r.get("srsi_1h"))
-        s4h, c4h, w4h = srf(r.get("srsi_4h"))
-        s1d, c1d, w1d = srf(r.get("srsi_1d"))
-        s_all = f"{s1h}/{s4h}/{s1d}"
 
         be_ = "🟢" if r["bull"] >= ALERT_THRESHOLD else ""
         re_ = "🔴" if r["bear"] >= ALERT_THRESHOLD else ""
@@ -783,9 +780,11 @@ def push_scan_report(results, now_str):
 
         htm += f'<tr style="background:{bg};{bd}">'
         htm += f'<td style="padding:3px 2px;font-weight:bold">{nm}</td>'
+        for tf in ["dmi_1h", "dmi_4h", "dmi_1d"]:
+            v = r[tf]
+            htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:{dcol.get(v,"#999")}">{v}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center;color:{dcol.get(st,"#999")}">{st}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center">{near_s}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center">{s_all}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td>'
         htm += '</tr>'
