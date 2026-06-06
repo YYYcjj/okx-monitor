@@ -23,8 +23,8 @@ POSITIONS_FILE = WORKSPACE / "positions.json"
 
 # 策略参数
 ST_PERIOD, ST_MULT = 10, 1
-NEAR_PCT = 0.005  # ±0.5%
-ALERT_THRESHOLD = 9
+NEAR_PCT = 0.01  # ±1%
+ALERT_THRESHOLD = 8
 MAX_RISK_PCT = 0.02  # 每笔最大亏损2%
 
 # 14币种池

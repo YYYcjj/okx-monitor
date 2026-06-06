@@ -7,7 +7,7 @@ strategy("OKX Strategy Engine", overlay=true, initial_capital=10000,
 
 // ═══════════════ 参数 ═══════════════
 // 评分
-SCORE_THRESHOLD = input.int(9, "预警阈值", minval=1, maxval=12)
+SCORE_THRESHOLD = input.int(8, "预警阈值", minval=1, maxval=12)
 DMI_PERIOD      = input.int(14, "DMI周期")
 RSI_PERIOD      = input.int(14, "StochRSI_R周期")
 STOCH_PERIOD    = input.int(14, "StochRSI_K周期")
@@ -16,7 +16,7 @@ SMOOTH_K        = input.int(3, "StochRSI平滑")
 // SuperTrend
 ST_PERIOD  = input.int(10, "ST周期")
 ST_FACTOR  = input.float(1.0, "ST倍数", step=0.5)
-NEAR_PCT   = input.float(0.5, "ST附近%", step=0.1) / 100
+NEAR_PCT   = input.float(1.0, "ST附近%", step=0.5) / 100
 
 // 止损止盈
 SL_ATR_MULT = input.float(2.0, "止损ATR倍数", step=0.5)
