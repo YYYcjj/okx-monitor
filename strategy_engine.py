@@ -647,7 +647,6 @@ def push_scan_report(results, now_str):
         return
 
     alert_count = sum(1 for r in results if max(r["bull"], r["bear"]) >= ALERT_THRESHOLD)
-    dcol = {"多": "#27ae60", "空": "#e74c3c", "N/A": "#999"}
 
     def sc(v):
         try:
@@ -666,35 +665,7 @@ def push_scan_report(results, now_str):
     htm += f'<h3 style="margin:0 0 2px;color:#333">📊 OKX 策略扫描 + SuperTrend</h3>'
     htm += f'<p style="color:#999;font-size:11px;margin:0 0 10px">{now_str} CST | 14币种 | 入场:ST±{NEAR_PCT*100:.1f}%同向 止损:2×ATR 仓位:2%权益</p>'
 
-    # ── DMI 方向总览（置顶）──
-    htm += '<p style="font-weight:bold;color:#333;margin:6px 0 4px;font-size:13px">🧭 DMI 多空方向</p>'
-    htm += '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px">'
-    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666">'
-    htm += '<td style="padding:3px 2px">币种</td>'
-    for tf in ["1H", "4H", "1D"]:
-        htm += f'<td style="padding:3px 1px;text-align:center">{tf}</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">价格</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">多分</td><td style="padding:3px 1px;text-align:center">空分</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">预警</td>'
-    htm += '</tr>'
     dcol = {"多": "#27ae60", "空": "#e74c3c", "N/A": "#999"}
-    for i, r in enumerate(results):
-        bg = "#fff" if i % 2 == 0 else "#fafbfc"
-        nm = r["symbol"].replace("-USDT-SWAP", "")
-        max_s = max(r["bull"], r["bear"])
-        alert_icon = "🔴" if max_s >= ALERT_THRESHOLD else ""
-        bd = "border-left:3px solid #e74c3c;" if max_s >= ALERT_THRESHOLD else ""
-        htm += f'<tr style="background:{bg};{bd}">'
-        htm += f'<td style="padding:3px 2px;font-weight:bold">{nm}</td>'
-        for tf in ["dmi_1h", "dmi_4h", "dmi_1d"]:
-            v = r[tf]
-            htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:{dcol.get(v,"#999")}">{v}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center;font-size:9px">{r["price"]:.6f}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center;color:#27ae60;font-weight:bold">{r["bull"]}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center;color:#e74c3c;font-weight:bold">{r["bear"]}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center">{alert_icon}</td>'
-        htm += '</tr>'
-    htm += '</table>'
 
     # ── 高分预警详细区 ──
     alerts = [r for r in results if max(r["bull"], r["bear"]) >= ALERT_THRESHOLD]
@@ -709,7 +680,6 @@ def push_scan_report(results, now_str):
             atr = r.get("atr") or 0
             near = abs(price - st_line) / max(st_line, 1) * 100 if st_line else 999
             near_ok = "✅" if near <= (NEAR_PCT * 100) else f"距ST{near:.2f}%（需≤{NEAR_PCT*100:.1f}%）"
-            dir_ok = "✅" if (r["bull"] >= ALERT_THRESHOLD and st == "多") or (r["bear"] >= ALERT_THRESHOLD and st == "空") else "❌方向不一致"
 
             if r["bull"] >= ALERT_THRESHOLD:
                 htm += f'<p style="margin:6px 0 2px;font-size:15px;font-weight:bold">🟢 {nm} 多分={r["bull"]}</p>'
@@ -721,11 +691,10 @@ def push_scan_report(results, now_str):
             htm += f'SuperTrend: <b style="color:{dcol.get(st,"#999")}">{st}@{st_line:.6f}</b> | '
             htm += f'ATR(14): <b>{atr:.6f}</b></p>'
 
-            htm += f'<p style="margin:1px 0;font-size:11px;color:#555">'
-            htm += f'DMI方向: 1H={r["dmi_1h"]} 4H={r["dmi_4h"]} 1D={r["dmi_1d"]} | '
             s1h = f"{r['srsi_1h']:.0f}" if r['srsi_1h'] is not None else "N/A"
             s4h = f"{r['srsi_4h']:.0f}" if r['srsi_4h'] is not None else "N/A"
             s1d = f"{r['srsi_1d']:.0f}" if r['srsi_1d'] is not None else "N/A"
+            htm += f'<p style="margin:1px 0;font-size:11px;color:#555">'
             htm += f'StochRSI: 1H={s1h} 4H={s4h} 1D={s1d}</p>'
 
             htm += f'<p style="margin:1px 0;font-size:11px;color:#555">'
@@ -736,12 +705,50 @@ def push_scan_report(results, now_str):
                 htm += f'<b style="color:#27ae60">🎯 可入场！止损: {stop_l:.6f}</b></p>'
             else:
                 htm += f'<span style="color:#e67e22">待满足</span></p>'
-
         htm += '</div>'
 
-    # ── 关键区间详细区 ──
+    # ── 多空评分 + SuperTrend 总览（置顶）──
+    htm += '<p style="font-weight:bold;color:#333;margin:10px 0 4px;font-size:13px">📊 多空评分 + SuperTrend</p>'
+    htm += '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px">'
+    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666">'
+    htm += '<td style="padding:3px 2px">币种</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">ST</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">距ST</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">SRSI</td>'
+    htm += '<td style="padding:3px 1px;text-align:center;color:#27ae60">多</td>'
+    htm += '<td style="padding:3px 1px;text-align:center;color:#e74c3c">空</td>'
+    htm += '</tr>'
+    for i, r in enumerate(results):
+        bg = "#fff" if i % 2 == 0 else "#fafbfc"
+        nm = r["symbol"].replace("-USDT-SWAP", "")
+        alert_flag = max(r["bull"], r["bear"]) >= ALERT_THRESHOLD
+        bd = "border-left:3px solid #e74c3c;" if alert_flag else ""
+
+        s1h, c1h, w1h = srf(r.get("srsi_1h"))
+        s4h, c4h, w4h = srf(r.get("srsi_4h"))
+        s1d, c1d, w1d = srf(r.get("srsi_1d"))
+        s_all = f"{s1h}/{s4h}/{s1d}"
+
+        be_ = "🟢" if r["bull"] >= ALERT_THRESHOLD else ""
+        re_ = "🔴" if r["bear"] >= ALERT_THRESHOLD else ""
+        st = r.get("st_trend", "N/A")
+        st_line = r.get("st_line", 0) or 0
+        near = abs(r["price"] - st_line) / max(st_line, 1) * 100 if st_line else 999
+        near_s = f"{near:.1f}%" if near < 100 else "远"
+
+        htm += f'<tr style="background:{bg};{bd}">'
+        htm += f'<td style="padding:3px 2px;font-weight:bold">{nm}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center;color:{dcol.get(st,"#999")}">{st}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center">{near_s}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center">{s_all}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td>'
+        htm += '</tr>'
+    htm += '</table>'
+
+    # ── 关键区间 ──
     htm += '<p style="font-weight:bold;color:#333;margin:10px 0 4px;font-size:13px">📐 关键支撑/阻力区间（历史多次触及）</p>'
-    htm += '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:8px">'
+    htm += '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px">'
     htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666">'
     htm += '<td style="padding:3px 2px">币种</td>'
     htm += '<td style="padding:3px 2px;text-align:center">价格</td>'
@@ -776,48 +783,29 @@ def push_scan_report(results, now_str):
         htm += '</tr>'
     htm += '</table>'
 
-    # ── 评分表（精简）──
-    htm += '<p style="font-weight:bold;color:#333;margin:10px 0 4px;font-size:13px">📊 多空评分 + SuperTrend</p>'
-    htm += '<table style="width:100%;border-collapse:collapse;font-size:10px">'
+    # ── DMI 方向总览（底部）──
+    htm += '<p style="font-weight:bold;color:#333;margin:10px 0 4px;font-size:13px">🧭 DMI 多空方向</p>'
+    htm += '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px">'
     htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666">'
     htm += '<td style="padding:3px 2px">币种</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">1H</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">4H</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">1D</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">SRSI</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">ST</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">距ST</td>'
-    htm += '<td style="padding:3px 1px;text-align:center;color:#27ae60">多</td>'
-    htm += '<td style="padding:3px 1px;text-align:center;color:#e74c3c">空</td>'
+    for tf in ["1H", "4H", "1D"]:
+        htm += f'<td style="padding:3px 1px;text-align:center">{tf}</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">价格</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">预警</td>'
     htm += '</tr>'
     for i, r in enumerate(results):
         bg = "#fff" if i % 2 == 0 else "#fafbfc"
         nm = r["symbol"].replace("-USDT-SWAP", "")
-        alert_flag = max(r["bull"], r["bear"]) >= ALERT_THRESHOLD
-        bd = "border-left:3px solid #e74c3c;" if alert_flag else ""
-
-        s1h, c1h, w1h = srf(r.get("srsi_1h"))
-        s4h, c4h, w4h = srf(r.get("srsi_4h"))
-        s1d, c1d, w1d = srf(r.get("srsi_1d"))
-        s_all = f"{s1h}/{s4h}/{s1d}"
-
-        be_ = "🟢" if r["bull"] >= ALERT_THRESHOLD else ""
-        re_ = "🔴" if r["bear"] >= ALERT_THRESHOLD else ""
-        st = r.get("st_trend", "N/A")
-        st_line = r.get("st_line", 0) or 0
-        near = abs(r["price"] - st_line) / max(st_line, 1) * 100 if st_line else 999
-        near_s = f"{near:.1f}%" if near < 100 else "远"
-
+        max_s = max(r["bull"], r["bear"])
+        alert_icon = "🔴" if max_s >= ALERT_THRESHOLD else ""
+        bd = "border-left:3px solid #e74c3c;" if max_s >= ALERT_THRESHOLD else ""
         htm += f'<tr style="background:{bg};{bd}">'
         htm += f'<td style="padding:3px 2px;font-weight:bold">{nm}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center;color:{dcol.get(r["dmi_1h"],"#999")}">{r["dmi_1h"]}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center;color:{dcol.get(r["dmi_4h"],"#999")}">{r["dmi_4h"]}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center;color:{dcol.get(r["dmi_1d"],"#999")}">{r["dmi_1d"]}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center">{s_all}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center;color:{dcol.get(st,"#999")}">{st}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center">{near_s}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td>'
+        for tf in ["dmi_1h", "dmi_4h", "dmi_1d"]:
+            v = r[tf]
+            htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:{dcol.get(v,"#999")}">{v}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center;font-size:9px">{r["price"]:.6f}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center">{alert_icon}</td>'
         htm += '</tr>'
     htm += '</table>'
 
