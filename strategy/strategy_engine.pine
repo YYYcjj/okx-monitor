@@ -19,7 +19,7 @@ ST_FACTOR  = input.float(1.0, "ST倍数", step=0.5)
 NEAR_PCT   = input.float(1.0, "ST附近%", step=0.5) / 100
 
 // 止损止盈
-SL_ATR_MULT = input.float(2.0, "止损ATR倍数", step=0.5)
+SL_ATR_MULT = input.float(1.66, "止损ATR倍数", step=0.5)
 TP_ATR_MULT = input.float(4.0, "止盈ATR倍数(备用)", step=0.5)
 ATR_PERIOD  = input.int(14, "ATR周期")
 

@@ -26,6 +26,7 @@ ST_PERIOD, ST_MULT = 10, 1
 NEAR_PCT = 0.01  # ±1%
 ALERT_THRESHOLD = 8
 MAX_RISK_PCT = 0.02  # 每笔最大亏损2%
+SL_ATR_MULT = 1.66  # 止损ATR倍数
 
 # 14币种池
 SYMBOLS_FILE = "/Users/yyy/WorkBuddy/2026-06-03-21-23-44/okx-monitor/SYMBOLS.txt"
@@ -497,9 +498,9 @@ def detect_signals(scan_results, active_positions):
         
         # 止损价：2x ATR
         if direction == "long":
-            stop_loss = price - 2 * atr
+            stop_loss = price - SL_ATR_MULT * atr
         else:
-            stop_loss = price + 2 * atr
+            stop_loss = price + SL_ATR_MULT * atr
         
         # 止盈目标：关键阻力/支撑区间
         # 做多 → 看上方的阻力区间；做空 → 看下方的支撑区间
@@ -741,7 +742,7 @@ def push_scan_report(results, now_str):
             htm += f'ST位: {st_line:.6f} | 入场条件: {near_ok} | '
             entry_ready = near <= (NEAR_PCT * 100)
             if entry_ready:
-                stop_l = price - 2 * atr if r["bull"] >= ALERT_THRESHOLD else price + 2 * atr
+                stop_l = price - SL_ATR_MULT * atr if r["bull"] >= ALERT_THRESHOLD else price + SL_ATR_MULT * atr
                 htm += f'<b style="color:#27ae60">🎯 可入场！止损: {stop_l:.6f}</b></p>'
             else:
                 htm += f'<span style="color:#e67e22">待满足</span></p>'
@@ -1019,9 +1020,9 @@ def run_once(dry_run=False):
                 # 同时更新止盈（移动止盈 = 2x ATR 距离）
                 atr = lp.get("atr", entry * 0.01)
                 if direction == "long":
-                    lp["tp_target"] = mark_px + 2 * atr
+                    lp["tp_target"] = mark_px + SL_ATR_MULT * atr
                 else:
-                    lp["tp_target"] = mark_px - 2 * atr
+                    lp["tp_target"] = mark_px - SL_ATR_MULT * atr
                 print(f"    新止损: 保本{entry:.2f} | 新止盈: {lp['tp_target']:.2f}")
             
             elif decision == "half_close":
@@ -1036,9 +1037,9 @@ def run_once(dry_run=False):
                 lp["size"] = lp["size"] - half_size
                 atr = lp.get("atr", entry * 0.01)
                 if direction == "long":
-                    lp["tp_target"] = mark_px + 2 * atr
+                    lp["tp_target"] = mark_px + SL_ATR_MULT * atr
                 else:
-                    lp["tp_target"] = mark_px - 2 * atr
+                    lp["tp_target"] = mark_px - SL_ATR_MULT * atr
                 print(f"    剩余{lp['size']}张 | 止损: 保本{entry:.2f} | 新止盈: {lp['tp_target']:.2f}")
             
             save_positions(local_pos)
