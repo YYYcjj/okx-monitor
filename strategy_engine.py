@@ -666,6 +666,36 @@ def push_scan_report(results, now_str):
     htm += f'<h3 style="margin:0 0 2px;color:#333">📊 OKX 策略扫描 + SuperTrend</h3>'
     htm += f'<p style="color:#999;font-size:11px;margin:0 0 10px">{now_str} CST | 14币种 | 入场:ST±{NEAR_PCT*100:.1f}%同向 止损:2×ATR 仓位:2%权益</p>'
 
+    # ── DMI 方向总览（置顶）──
+    htm += '<p style="font-weight:bold;color:#333;margin:6px 0 4px;font-size:13px">🧭 DMI 多空方向</p>'
+    htm += '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px">'
+    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666">'
+    htm += '<td style="padding:3px 2px">币种</td>'
+    for tf in ["1H", "4H", "1D"]:
+        htm += f'<td style="padding:3px 1px;text-align:center">{tf}</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">价格</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">多分</td><td style="padding:3px 1px;text-align:center">空分</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">预警</td>'
+    htm += '</tr>'
+    dcol = {"多": "#27ae60", "空": "#e74c3c", "N/A": "#999"}
+    for i, r in enumerate(results):
+        bg = "#fff" if i % 2 == 0 else "#fafbfc"
+        nm = r["symbol"].replace("-USDT-SWAP", "")
+        max_s = max(r["bull"], r["bear"])
+        alert_icon = "🔴" if max_s >= ALERT_THRESHOLD else ""
+        bd = "border-left:3px solid #e74c3c;" if max_s >= ALERT_THRESHOLD else ""
+        htm += f'<tr style="background:{bg};{bd}">'
+        htm += f'<td style="padding:3px 2px;font-weight:bold">{nm}</td>'
+        for tf in ["dmi_1h", "dmi_4h", "dmi_1d"]:
+            v = r[tf]
+            htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:{dcol.get(v,"#999")}">{v}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center;font-size:9px">{r["price"]:.6f}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center;color:#27ae60;font-weight:bold">{r["bull"]}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center;color:#e74c3c;font-weight:bold">{r["bear"]}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center">{alert_icon}</td>'
+        htm += '</tr>'
+    htm += '</table>'
+
     # ── 高分预警详细区 ──
     alerts = [r for r in results if max(r["bull"], r["bear"]) >= ALERT_THRESHOLD]
     if alerts:
