@@ -22,7 +22,7 @@ TRADE_LOG = WORKSPACE / "trades.csv"
 POSITIONS_FILE = WORKSPACE / "positions.json"
 
 # 策略参数
-ST_PERIOD, ST_MULT = 10, 3
+ST_PERIOD, ST_MULT = 10, 1
 NEAR_PCT = 0.005  # ±0.5%
 ALERT_THRESHOLD = 9
 MAX_RISK_PCT = 0.02  # 每笔最大亏损2%
@@ -81,8 +81,8 @@ CT_VAL = {
 }
 
 # ── SuperTrend 计算 ──
-def calc_supertrend(candles, period=10, multiplier=3):
-    """返回 (trend: '多'/'空', st_line: 当前SuperTrend值, st_prev: 前一根)"""
+def calc_supertrend(candles, period=10, multiplier=1):
+    """标准 SuperTrend 算法。返回 (trend: '多'/'空', st_line, st_prev)"""
     n = len(candles)
     if n < period + 1:
         return "N/A", None, None
@@ -91,60 +91,69 @@ def calc_supertrend(candles, period=10, multiplier=3):
     lows = [c["l"] for c in candles]
     closes = [c["c"] for c in candles]
     
-    # 计算 ATR
-    atr_list = [0.0] * n
+    # ATR (Wilder's smoothing)
+    atr = [0.0] * n
     for i in range(1, n):
-        h, l, pc = highs[i], lows[i], closes[i-1]
-        atr_list[i] = max(h - l, abs(h - pc), abs(l - pc))
-    atr_val = sum(atr_list[1:period+1]) / period
+        atr[i] = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+    atr_val = sum(atr[1:period+1]) / period
+    atr[period] = atr_val
     for i in range(period + 1, n):
-        atr_val = (atr_val * (period - 1) + atr_list[i]) / period
-        atr_list[i] = atr_val
+        atr_val = (atr_val * (period - 1) + atr[i]) / period
+        atr[i] = atr_val
     
     # 基本带
-    upper = [0.0] * n
-    lower = [0.0] * n
-    for i in range(n):
+    upper_band = [0.0] * n
+    lower_band = [0.0] * n
+    for i in range(period, n):
         hl2 = (highs[i] + lows[i]) / 2
-        upper[i] = hl2 + multiplier * atr_list[i]
-        lower[i] = hl2 - multiplier * atr_list[i]
+        upper_band[i] = hl2 + multiplier * atr[i]
+        lower_band[i] = hl2 - multiplier * atr[i]
     
-    # SuperTrend 最终值（带趋势修正）
-    st_final = [0.0] * n
-    trend = [1] * n  # 1=多, -1=空
+    # SuperTrend: 趋势跟踪逻辑
+    st = [0.0] * n
+    trend = [0] * n  # 1=多, -1=空
     start = period
     
-    # 初始方向
-    if closes[start] > upper[start]:
-        trend[start] = -1
-        st_final[start] = upper[start]
+    # 初始方向：close 更靠近上轨=空头，更靠近下轨=多头
+    if closes[start] >= upper_band[start]:
+        trend[start] = -1  # 空
+        st[start] = upper_band[start]
+    elif closes[start] <= lower_band[start]:
+        trend[start] = 1   # 多
+        st[start] = lower_band[start]
     else:
-        trend[start] = 1
-        st_final[start] = lower[start]
+        # 在带中间，取靠近的一侧
+        if abs(closes[start] - upper_band[start]) < abs(closes[start] - lower_band[start]):
+            trend[start] = -1
+            st[start] = upper_band[start]
+        else:
+            trend[start] = 1
+            st[start] = lower_band[start]
     
     for i in range(start + 1, n):
-        prev_trend = trend[i-1]
-        prev_st = st_final[i-1]
+        prev_t = trend[i-1]
+        prev_s = st[i-1]
         
-        if prev_trend == 1:  # 之前多头
-            # 下轨不能低于前值
-            curr_lower = max(lower[i], prev_st) if closes[i-1] > lower[i] and lower[i] > prev_st else lower[i]
-            if closes[i] < curr_lower:
+        if prev_t == 1:  # 多头中
+            # 下轨只能上升（跟踪止损）
+            trail = max(lower_band[i], prev_s)
+            if closes[i] < trail:
                 trend[i] = -1
-                st_final[i] = upper[i]
+                st[i] = upper_band[i]
             else:
                 trend[i] = 1
-                st_final[i] = curr_lower
-        else:  # 之前空头
-            curr_upper = min(upper[i], prev_st) if closes[i-1] < upper[i] and upper[i] < prev_st else upper[i]
-            if closes[i] > curr_upper:
+                st[i] = trail
+        else:  # 空头中
+            # 上轨只能下降
+            trail = min(upper_band[i], prev_s)
+            if closes[i] > trail:
                 trend[i] = 1
-                st_final[i] = lower[i]
+                st[i] = lower_band[i]
             else:
                 trend[i] = -1
-                st_final[i] = curr_upper
+                st[i] = trail
     
-    return ("多" if trend[-1] == 1 else "空"), st_final[-1], st_final[-2]
+    return ("多" if trend[-1] == 1 else "空"), st[-1], st[-2]
 
 
 # ── 关键区间检测（历史多次触及）──
