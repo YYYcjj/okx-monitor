@@ -3,7 +3,7 @@ OKX 模拟交易策略执行引擎
 策略: 扫描高分 + 1H SuperTrend(10,3) ±0.5% 入场
 止损: 2×1H ATR | 止盈: 关键位重扫
 """
-import sys, os, json, time, csv
+import sys, os, json, time, csv, requests
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -31,6 +31,10 @@ MAX_RISK_PCT = 0.02  # 每笔最大亏损2%
 SYMBOLS_FILE = "/Users/yyy/WorkBuddy/2026-06-03-21-23-44/okx-monitor/SYMBOLS.txt"
 with open(SYMBOLS_FILE) as f:
     SYMBOLS = [line.strip() for line in f if line.strip()]
+
+# PushPlus 配置
+PUSHPLUS_TOKEN = "68fb8af9e2764f5f9a3bb29ab1418cd3"
+PUSHPLUS_URL = "http://www.pushplus.plus/send"
 
 # 合约面值 (U本位)
 CT_VAL = {
@@ -617,6 +621,146 @@ def load_local_positions():
     return []
 
 
+# ── PushPlus 推送 ──
+def pushplus_send(title, content, template="html"):
+    """发送 PushPlus 通知"""
+    if not PUSHPLUS_TOKEN:
+        print("  ⚠️ PushPlus Token 未配置")
+        return False
+    try:
+        payload = {"token": PUSHPLUS_TOKEN, "title": title, "content": content, "template": template}
+        resp = requests.post(PUSHPLUS_URL, json=payload, timeout=10,
+                           proxies={"http": None, "https": None})
+        r = resp.json()
+        if r.get("code") == 200:
+            return True
+        print(f"  ❌ PushPlus失败: {r.get('msg','')}")
+        return False
+    except Exception as e:
+        print(f"  ❌ PushPlus异常: {e}")
+        return False
+
+
+def push_scan_report(results, now_str):
+    """推送完整扫描报表（HTML格式）"""
+    if not PUSHPLUS_TOKEN:
+        return
+
+    alert_count = sum(1 for r in results if max(r["bull"], r["bear"]) >= ALERT_THRESHOLD)
+    dcol = {"多": "#27ae60", "空": "#e74c3c", "N/A": "#999"}
+
+    def sc(v):
+        try:
+            n = float(v)
+            if n > 80: return "#e74c3c", "bold"
+            if n < 20: return "#27ae60", "bold"
+        except: pass
+        return "#333", "normal"
+
+    def srf(v):
+        if v is None: return "N/A", "#999", "normal"
+        c, w = sc(v); return f"{v:.0f}", c, w
+
+    htm = '<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:560px">'
+    htm += f'<h3 style="margin:0 0 6px;color:#333">📊 OKX 策略扫描 + SuperTrend</h3>'
+    htm += f'<p style="color:#999;font-size:12px;margin:0 0 10px">{now_str}</p>'
+
+    # 高分预警区
+    alerts = [r for r in results if max(r["bull"], r["bear"]) >= ALERT_THRESHOLD]
+    if alerts:
+        htm += f'<p style="color:#e74c3c;font-weight:bold;margin:0 0 6px">⚠️ 高分预警（≥{ALERT_THRESHOLD}分）</p>'
+        for r in alerts:
+            nm = r["symbol"].replace("-USDT-SWAP", "")
+            # 入场条件检查
+            st = r.get("st_trend", "N/A")
+            st_line = r.get("st_line", 0) or 0
+            near = abs(r["price"] - st_line) / max(st_line, 1) * 100 if st_line else 999
+            near_ok = "✅" if near <= (NEAR_PCT * 100) else "❌"
+            dir_ok = "✅" if (r["bull"] >= ALERT_THRESHOLD and st == "多") or (r["bear"] >= ALERT_THRESHOLD and st == "空") else "❌"
+
+            if r["bull"] >= ALERT_THRESHOLD:
+                htm += f'<p style="margin:4px 0;font-size:14px">🟢 <b>{nm}</b> 多分={r["bull"]} | ST:{st}@{st_line:.2f} 距ST:{near:.1f}% {near_ok} {dir_ok}</p>'
+            if r["bear"] >= ALERT_THRESHOLD:
+                htm += f'<p style="margin:4px 0;font-size:14px">🔴 <b>{nm}</b> 空分={r["bear"]} | ST:{st}@{st_line:.2f} 距ST:{near:.1f}% {near_ok} {dir_ok}</p>'
+
+            # 关键区间
+            kr = r.get("key_resistance")
+            ks = r.get("key_support")
+            if kr:
+                htm += f'<p style="margin:1px 0;font-size:11px;color:#666">  阻力: {kr["center"]:.4f} (触及{kr["touches"]}次/质量{kr["quality"]}/强度{kr["strength"]})</p>'
+            if ks:
+                htm += f'<p style="margin:1px 0;font-size:11px;color:#666">  支撑: {ks["center"]:.4f} (触及{ks["touches"]}次/质量{ks["quality"]}/强度{ks["strength"]})</p>'
+
+        htm += '<hr style="border:0;border-top:1px solid #eee;margin:8px 0">'
+
+    # 全量表
+    htm += '<table style="width:100%;border-collapse:collapse;font-size:11px">'
+    htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666">'
+    htm += '<td style="padding:4px 2px">币种</td>'
+    htm += '<td style="padding:4px 1px;text-align:center">1H</td>'
+    htm += '<td style="padding:4px 1px;text-align:center">4H</td>'
+    htm += '<td style="padding:4px 1px;text-align:center">1D</td>'
+    htm += '<td style="padding:4px 1px;text-align:center">SRSI 1H</td>'
+    htm += '<td style="padding:4px 1px;text-align:center">SRSI 4H</td>'
+    htm += '<td style="padding:4px 1px;text-align:center">SRSI 1D</td>'
+    htm += '<td style="padding:4px 1px;text-align:center">ST</td>'
+    htm += '<td style="padding:4px 1px;text-align:center;color:#27ae60">多</td>'
+    htm += '<td style="padding:4px 1px;text-align:center;color:#e74c3c">空</td>'
+    htm += '</tr>'
+
+    for i, r in enumerate(results):
+        bg = "#fff" if i % 2 == 0 else "#fafbfc"
+        nm = r["symbol"].replace("-USDT-SWAP", "")
+        alert_flag = max(r["bull"], r["bear"]) >= ALERT_THRESHOLD
+        bd = "border-left:3px solid #e74c3c;" if alert_flag else ""
+
+        s1h, c1h, w1h = srf(r.get("srsi_1h"))
+        s4h, c4h, w4h = srf(r.get("srsi_4h"))
+        s1d, c1d, w1d = srf(r.get("srsi_1d"))
+
+        be_ = "🟢" if r["bull"] >= ALERT_THRESHOLD else ""
+        re_ = "🔴" if r["bear"] >= ALERT_THRESHOLD else ""
+        st = r.get("st_trend", "N/A")
+
+        htm += f'<tr style="background:{bg};{bd}">'
+        htm += f'<td style="padding:4px 2px;font-weight:bold">{nm}</td>'
+        htm += f'<td style="padding:4px 1px;text-align:center;color:{dcol.get(r["dmi_1h"],"#999")}">{r["dmi_1h"]}</td>'
+        htm += f'<td style="padding:4px 1px;text-align:center;color:{dcol.get(r["dmi_4h"],"#999")}">{r["dmi_4h"]}</td>'
+        htm += f'<td style="padding:4px 1px;text-align:center;color:{dcol.get(r["dmi_1d"],"#999")}">{r["dmi_1d"]}</td>'
+        htm += f'<td style="padding:4px 1px;text-align:center;color:{c1h};font-weight:{w1h}">{s1h}</td>'
+        htm += f'<td style="padding:4px 1px;text-align:center;color:{c4h};font-weight:{w4h}">{s4h}</td>'
+        htm += f'<td style="padding:4px 1px;text-align:center;color:{c1d};font-weight:{w1d}">{s1d}</td>'
+        htm += f'<td style="padding:4px 1px;text-align:center;font-size:10px;color:{dcol.get(st,"#999")}">{st}</td>'
+        htm += f'<td style="padding:4px 1px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td>'
+        htm += f'<td style="padding:4px 1px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td>'
+        htm += '</tr>'
+
+    htm += '</table>'
+    htm += '<hr style="border:0;border-top:1px solid #eee;margin:6px 0">'
+    htm += '<p style="color:#999;font-size:10px;margin:0">📐 DMI+StochRSI+SuperTrend(10,3) | 15min扫描 | ≥6分预警</p>'
+    htm += f'<p style="color:#999;font-size:10px;margin:0">🎯 入场: ST±{NEAR_PCT*100:.1f}%同向 | 止损:2×ATR | 仓位:总权益2%</p>'
+    htm += '</div>'
+
+    title = f"OKX {alert_count}预警" if alert_count else "OKX 策略扫描"
+    pushplus_send(title, htm)
+
+
+def push_trade_alert(action, symbol, direction, price, size, extra=""):
+    """推送交易操作通知"""
+    if not PUSHPLUS_TOKEN:
+        return
+    emoji = "🟢" if direction == "long" else "🔴"
+    dir_cn = "开多" if direction == "long" else "开空"
+    htm = f'<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:400px">'
+    htm += f'<h3 style="margin:0 0 6px">{emoji} {action}</h3>'
+    htm += f'<p style="font-size:15px;font-weight:bold;margin:4px 0">{symbol.replace("-USDT-SWAP","")} {dir_cn} {size}张 @ {price}</p>'
+    if extra:
+        htm += f'<p style="font-size:12px;color:#666;margin:2px 0">{extra}</p>'
+    htm += f'<p style="font-size:11px;color:#999;margin:6px 0 0">{datetime.now(CST).strftime("%m-%d %H:%M")}</p>'
+    htm += '</div>'
+    pushplus_send(f"{emoji} {symbol.replace('-USDT-SWAP','')} {dir_cn}", htm)
+
+
 # ── 主循环 ──
 def run_once(dry_run=False):
     now = datetime.now(CST)
@@ -670,6 +814,9 @@ def run_once(dry_run=False):
     print(f"\n🎯 入场信号: {len(signals)} 个")
     
     if dry_run or not signals:
+        # 推送扫描报告（即使无信号也推）
+        now_str = now.strftime("%m-%d %H:%M")
+        push_scan_report(results, now_str)
         return results, signals, active
     
     # 5. 获取余额
@@ -700,6 +847,9 @@ def run_once(dry_run=False):
             print(f"  ❌ 下单失败: {err}")
         else:
             print(f"  ✅ 已下单: {ord_id}")
+            # 推送交易通知
+            push_trade_alert("入场", sig["symbol"], sig["direction"], sig["price"], size,
+                           f"止损:{sig['stop_loss']:.2f} 止盈:{sig['tp_target']:.4f} [{now.strftime('%m/%d %H:%M')}]" if False else f"止损:{sig['stop_loss']:.2f} 止盈:{sig['tp_target']:.4f}")
             log_trade(
                 sig["time"], sig["symbol"], sig["direction"],
                 sig["price"], size, sig["stop_loss"]
@@ -756,6 +906,8 @@ def run_once(dry_run=False):
             log_trade(lp["entry_time"], symbol, direction, lp["entry_price"], lp["size"],
                       stop_loss, exit_time=now.isoformat(), exit_price=mark_px,
                       exit_reason="stop_loss", pnl=upl)
+            push_trade_alert("止损平仓", symbol, direction, mark_px, lp["size"],
+                           f"UPL:{upl:+.2f} [模式: 模拟盘]")
             local_pos = [p for p in local_pos if not (p["instId"]==symbol and p["posSide"]==pos_side)]
             save_positions(local_pos)
         
@@ -770,6 +922,8 @@ def run_once(dry_run=False):
                 log_trade(lp["entry_time"], symbol, direction, lp["entry_price"], lp["size"],
                           stop_loss, exit_time=now.isoformat(), exit_price=mark_px,
                           exit_reason="tp_close_all", pnl=upl)
+                push_trade_alert("止盈全平", symbol, direction, mark_px, lp["size"],
+                               f"UPL:{upl:+.2f} | 我方{my_score} vs 对方{opp_score} [模式: 模拟盘]")
                 local_pos = [p for p in local_pos if not (p["instId"]==symbol and p["posSide"]==pos_side)]
             
             elif decision == "move_stop":
@@ -789,6 +943,8 @@ def run_once(dry_run=False):
                 half_size = max(1, lp["size"] // 2)
                 print(f"    🟡 多空均衡，平仓一半 ({half_size}张)")
                 close_position(symbol, pos_side, half_size)
+                push_trade_alert("止盈平半", symbol, direction, mark_px, half_size,
+                               f"UPL:{upl:+.2f} | 剩余{lp['size']-half_size}张移保本 [模式: 模拟盘]")
                 # 更新剩余一半的止损为保本
                 entry = lp["entry_price"]
                 lp["stop_loss"] = entry
@@ -801,6 +957,10 @@ def run_once(dry_run=False):
                 print(f"    剩余{lp['size']}张 | 止损: 保本{entry:.2f} | 新止盈: {lp['tp_target']:.2f}")
             
             save_positions(local_pos)
+    
+    # 推送扫描报告
+    now_str = now.strftime("%m-%d %H:%M")
+    push_scan_report(results, now_str)
     
     return results, signals, active
 
