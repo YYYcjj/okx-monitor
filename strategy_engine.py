@@ -23,10 +23,10 @@ POSITIONS_FILE = WORKSPACE / "positions.json"
 
 # 策略参数
 ST_PERIOD, ST_MULT = 10, 1
-NEAR_PCT = 0.01  # ±1%
-ALERT_THRESHOLD = 8
+NEAR_PCT = 0.005  # ±0.5%
+ALERT_THRESHOLD = 9
 MAX_RISK_PCT = 0.02  # 每笔最大亏损2%
-SL_ATR_MULT = 1.66  # 止损ATR倍数
+SL_ATR_MULT = 2.0  # 止损ATR倍数
 
 # 14币种池
 SYMBOLS_FILE = "/Users/yyy/WorkBuddy/2026-06-03-21-23-44/okx-monitor/SYMBOLS.txt"
