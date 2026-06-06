@@ -760,6 +760,7 @@ def push_scan_report(results, now_str):
     htm += '<td style="padding:3px 1px;text-align:center">1H</td>'
     htm += '<td style="padding:3px 1px;text-align:center">4H</td>'
     htm += '<td style="padding:3px 1px;text-align:center">1D</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">SRSI</td>'
     htm += '<td style="padding:3px 1px;text-align:center">ST</td>'
     htm += '<td style="padding:3px 1px;text-align:center">距ST</td>'
     htm += '<td style="padding:3px 1px;text-align:center;color:#27ae60">多</td>'
@@ -770,6 +771,11 @@ def push_scan_report(results, now_str):
         nm = r["symbol"].replace("-USDT-SWAP", "")
         alert_flag = max(r["bull"], r["bear"]) >= ALERT_THRESHOLD
         bd = "border-left:3px solid #e74c3c;" if alert_flag else ""
+
+        s1h = f"{r['srsi_1h']:.0f}" if r['srsi_1h'] is not None else "N/A"
+        s4h = f"{r['srsi_4h']:.0f}" if r['srsi_4h'] is not None else "N/A"
+        s1d = f"{r['srsi_1d']:.0f}" if r['srsi_1d'] is not None else "N/A"
+        s_all = f"{s1h}/{s4h}/{s1d}"
 
         be_ = "🟢" if r["bull"] >= ALERT_THRESHOLD else ""
         re_ = "🔴" if r["bear"] >= ALERT_THRESHOLD else ""
@@ -783,6 +789,7 @@ def push_scan_report(results, now_str):
         for tf in ["dmi_1h", "dmi_4h", "dmi_1d"]:
             v = r[tf]
             htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:{dcol.get(v,"#999")}">{v}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center">{s_all}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center;color:{dcol.get(st,"#999")}">{st}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center">{near_s}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td>'
