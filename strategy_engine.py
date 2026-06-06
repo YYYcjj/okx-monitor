@@ -757,11 +757,11 @@ def push_scan_report(results, now_str):
     htm += '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px">'
     htm += '<tr style="background:#f5f6fa;font-weight:bold;color:#666">'
     htm += '<td style="padding:3px 2px">币种</td>'
+    htm += '<td style="padding:3px 1px;text-align:center">ST</td>'
     htm += '<td style="padding:3px 1px;text-align:center">1H</td>'
     htm += '<td style="padding:3px 1px;text-align:center">4H</td>'
     htm += '<td style="padding:3px 1px;text-align:center">1D</td>'
     htm += '<td style="padding:3px 1px;text-align:center">SRSI</td>'
-    htm += '<td style="padding:3px 1px;text-align:center">ST</td>'
     htm += '<td style="padding:3px 1px;text-align:center">距ST</td>'
     htm += '<td style="padding:3px 1px;text-align:center;color:#27ae60">多</td>'
     htm += '<td style="padding:3px 1px;text-align:center;color:#e74c3c">空</td>'
@@ -782,15 +782,15 @@ def push_scan_report(results, now_str):
         st = r.get("st_trend", "N/A")
         st_line = r.get("st_line", 0) or 0
         near = abs(r["price"] - st_line) / max(st_line, 1) * 100 if st_line else 999
-        near_s = f"{near:.1f}%" if near < 100 else "远"
+        near_s = f"{near:.1f}%" if near < 100 else "-"
 
         htm += f'<tr style="background:{bg};{bd}">'
         htm += f'<td style="padding:3px 2px;font-weight:bold">{nm}</td>'
+        htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:{dcol.get(st,"#999")}">{st}</td>'
         for tf in ["dmi_1h", "dmi_4h", "dmi_1d"]:
             v = r[tf]
             htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:{dcol.get(v,"#999")}">{v}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center">{s_all}</td>'
-        htm += f'<td style="padding:3px 1px;text-align:center;color:{dcol.get(st,"#999")}">{st}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center">{near_s}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:#27ae60">{be_}{r["bull"]}</td>'
         htm += f'<td style="padding:3px 1px;text-align:center;font-weight:bold;color:#e74c3c">{re_}{r["bear"]}</td>'
