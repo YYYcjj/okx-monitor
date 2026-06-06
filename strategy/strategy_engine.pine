@@ -1,0 +1,196 @@
+//@version=5
+// OKX 策略引擎 - TradingView Pine Script v1.0
+// 多时间框架 DMI+StochRSI 评分 + 1H SuperTrend 入场 + 四维关键区间止盈
+strategy("OKX Strategy Engine", overlay=true, initial_capital=10000,
+         default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+         commission_type=strategy.commission.percent, commission_value=0.05)
+
+// ═══════════════ 参数 ═══════════════
+// 评分
+SCORE_THRESHOLD = input.int(9, "预警阈值", minval=1, maxval=12)
+DMI_PERIOD      = input.int(14, "DMI周期")
+RSI_PERIOD      = input.int(14, "StochRSI_R周期")
+STOCH_PERIOD    = input.int(14, "StochRSI_K周期")
+SMOOTH_K        = input.int(3, "StochRSI平滑")
+
+// SuperTrend
+ST_PERIOD  = input.int(10, "ST周期")
+ST_FACTOR  = input.float(1.0, "ST倍数", step=0.5)
+NEAR_PCT   = input.float(0.5, "ST附近%", step=0.1) / 100
+
+// 止损止盈
+SL_ATR_MULT = input.float(2.0, "止损ATR倍数", step=0.5)
+TP_ATR_MULT = input.float(4.0, "止盈ATR倍数(备用)", step=0.5)
+ATR_PERIOD  = input.int(14, "ATR周期")
+
+// 选项
+USE_1H_ONLY = input.bool(true, "仅用1H(ST+ATR)", tooltip="ST和ATR始终用1H")
+
+// ═══════════════ 1H指标（主时间框架） ═══════════════
+// ATR
+atr_1h = ta.atr(ATR_PERIOD)
+
+// DMI
+[plus_di_1h, minus_di_1h, adx_1h] = ta.dmi(DMI_PERIOD)
+dmi_dir_1h = plus_di_1h > minus_di_1h ? 1 : -1
+
+// SuperTrend
+[st_line, st_dir] = ta.supertrend(ST_FACTOR, ST_PERIOD)
+st_near = math.abs(close - st_line) / st_line <= NEAR_PCT
+
+// StochRSI（手动计算）
+rsi_1h = ta.rsi(close, RSI_PERIOD)
+stoch_rsi_1h = ta.stoch(rsi_1h, rsi_1h, rsi_1h, STOCH_PERIOD) // K值
+sma_k_1h = ta.sma(stoch_rsi_1h, SMOOTH_K)
+d_1h = ta.sma(sma_k_1h, 3)
+srsi_1h = (sma_k_1h + d_1h) / 2
+
+// ═══════════════ 4H 指标 ═══════════════
+[plus_di_4h, minus_di_4h, _] = request.security(syminfo.tickerid, "240",
+    [ta.dmi(DMI_PERIOD)[0], ta.dmi(DMI_PERIOD)[1], ta.dmi(DMI_PERIOD)[2]])
+dmi_dir_4h = plus_di_4h > minus_di_4h ? 1 : -1
+
+rsi_4h = request.security(syminfo.tickerid, "240", ta.rsi(close, RSI_PERIOD))
+stoch_rsi_4h = request.security(syminfo.tickerid, "240", ta.stoch(ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), STOCH_PERIOD))
+sma_k_4h_val = request.security(syminfo.tickerid, "240", ta.sma(ta.stoch(ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), STOCH_PERIOD), SMOOTH_K))
+d_4h_val = request.security(syminfo.tickerid, "240", ta.sma(
+    ta.sma(ta.stoch(ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), STOCH_PERIOD), SMOOTH_K), 3))
+srsi_4h = (sma_k_4h_val + d_4h_val) / 2
+
+// ═══════════════ 1D 指标 ═══════════════
+[plus_di_1d, minus_di_1d, _] = request.security(syminfo.tickerid, "D",
+    [ta.dmi(DMI_PERIOD)[0], ta.dmi(DMI_PERIOD)[1], ta.dmi(DMI_PERIOD)[2]])
+dmi_dir_1d = plus_di_1d > minus_di_1d ? 1 : -1
+
+rsi_1d = request.security(syminfo.tickerid, "D", ta.rsi(close, RSI_PERIOD))
+stoch_rsi_1d = request.security(syminfo.tickerid, "D", ta.stoch(ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), STOCH_PERIOD))
+sma_k_1d_val = request.security(syminfo.tickerid, "D", ta.sma(ta.stoch(ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), STOCH_PERIOD), SMOOTH_K))
+d_1d_val = request.security(syminfo.tickerid, "D", ta.sma(
+    ta.sma(ta.stoch(ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), ta.rsi(close, RSI_PERIOD), STOCH_PERIOD), SMOOTH_K), 3))
+srsi_1d = (sma_k_1d_val + d_1d_val) / 2
+
+// ═══════════════ 多空评分 ═══════════════
+// DMI方向分: 1H=1, 4H=2, 1D=3
+dmi_bull = (dmi_dir_1h == 1 ? 1 : 0) + (dmi_dir_4h == 1 ? 2 : 0) + (dmi_dir_1d == 1 ? 3 : 0)
+dmi_bear = (dmi_dir_1h == -1 ? 1 : 0) + (dmi_dir_4h == -1 ? 2 : 0) + (dmi_dir_1d == -1 ? 3 : 0)
+
+// StochRSI极端值加分
+s_bull = dmi_bull + 0.0
+s_bear = dmi_bear + 0.0
+
+// 1H SRSI
+if not na(srsi_1h)
+    if srsi_1h < 20
+        s_bull += 1
+    if srsi_1h > 80
+        s_bear += 1
+
+// 4H SRSI
+if not na(srsi_4h)
+    if srsi_4h < 20
+        s_bull += 2
+    if srsi_4h > 80
+        s_bear += 2
+
+// 1D SRSI
+if not na(srsi_1d)
+    if srsi_1d < 20
+        s_bull += 3
+    else if srsi_1d < 30
+        s_bull += 1
+    if srsi_1d > 80
+        s_bear += 3
+    else if srsi_1d > 70
+        s_bear += 1
+
+bull_score = int(s_bull)
+bear_score = int(s_bear)
+
+// ═══════════════ 关键区间（摆动点） ═══════════════
+pivot_high = ta.pivothigh(high, 5, 5)
+pivot_low  = ta.pivotlow(low, 5, 5)
+
+var float nearest_resistance = na
+var float nearest_support = na
+
+if not na(pivot_high) and pivot_high > close
+    nearest_resistance := pivot_high
+if not na(pivot_low) and pivot_low < close
+    nearest_support := pivot_low
+
+// ═══════════════ 入场信号 ═══════════════
+// 多信号: 多分 >= 阈值 + 价格在ST线附近
+long_signal  = bull_score >= SCORE_THRESHOLD and st_near
+// 空信号: 空分 >= 阈值 + 价格在ST线附近
+short_signal = bear_score >= SCORE_THRESHOLD and st_near
+
+// ═══════════════ 止损止盈计算 ═══════════════
+sl_atr = SL_ATR_MULT * atr_1h
+
+// 止盈: 优先用关键区间，否则用ATR倍数
+long_tp = not na(nearest_resistance) ? nearest_resistance : close + TP_ATR_MULT * atr_1h
+short_tp = not na(nearest_support) ? nearest_support : close - TP_ATR_MULT * atr_1h
+
+// ═══════════════ 执行 ═══════════════
+if long_signal and strategy.position_size == 0
+    sl = close - sl_atr
+    tp = long_tp > close ? long_tp : close + TP_ATR_MULT * atr_1h
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long_Exit", "Long",
+                  stop=sl, limit=tp,
+                  trail_points=TP_ATR_MULT * atr_1h,
+                  trail_offset=SL_ATR_MULT * atr_1h)
+
+if short_signal and strategy.position_size == 0
+    sl = close + sl_atr
+    tp = short_tp < close ? short_tp : close - TP_ATR_MULT * atr_1h
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short_Exit", "Short",
+                  stop=sl, limit=tp,
+                  trail_points=TP_ATR_MULT * atr_1h,
+                  trail_offset=SL_ATR_MULT * atr_1h)
+
+// ═══════════════ 可视化 ═══════════════
+// SuperTrend
+plot(st_line, "ST线", color=st_dir > 0 ? color.green : color.red, linewidth=1)
+
+// 入场标记
+plotshape(long_signal, "多信号", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(short_signal, "空信号", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// 关键区间
+plot(nearest_resistance, "阻力", color=color.rgb(231, 76, 60, 60), style=plot.style_circles, linewidth=2)
+plot(nearest_support, "支撑", color=color.rgb(39, 174, 96, 60), style=plot.style_circles, linewidth=2)
+
+// ═══════════════ 信息面板 ═══════════════
+var info_table = table.new(position.top_right, 2, 9, border_width=1)
+
+if barstate.islastconfirmedhistory
+    table.cell(info_table, 0, 0, "指标", text_color=color.gray, text_size=size.small)
+    table.cell(info_table, 1, 0, "数值", text_color=color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 1, "多分", text_size=size.small)
+    table.cell(info_table, 1, 1, str.tostring(bull_score), text_color=bull_score >= SCORE_THRESHOLD ? color.green : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 2, "空分", text_size=size.small)
+    table.cell(info_table, 1, 2, str.tostring(bear_score), text_color=bear_score >= SCORE_THRESHOLD ? color.red : color.gray, text_size=size.small)
+    
+    d_str = dmi_dir_1h == 1 ? "多" : "空"
+    table.cell(info_table, 0, 3, "DMI 1H/4H/1D", text_size=size.small)
+    table.cell(info_table, 1, 3, d_str + "/" + (dmi_dir_4h == 1 ? "多" : "空") + "/" + (dmi_dir_1d == 1 ? "多" : "空"), text_size=size.small)
+    
+    table.cell(info_table, 0, 4, "SRSI 1H/4H/1D", text_size=size.small)
+    table.cell(info_table, 1, 4, str.tostring(math.round(srsi_1h, 0)) + "/" + str.tostring(math.round(srsi_4h, 0)) + "/" + str.tostring(math.round(srsi_1d, 0)), text_size=size.small)
+    
+    table.cell(info_table, 0, 5, "ST@" + str.tostring(ST_FACTOR), text_size=size.small)
+    table.cell(info_table, 1, 5, str.tostring(math.round(st_line, 2)), text_color=st_dir > 0 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(info_table, 0, 6, "ATR(14)", text_size=size.small)
+    table.cell(info_table, 1, 6, str.tostring(math.round(atr_1h, 2)), text_size=size.small)
+    
+    table.cell(info_table, 0, 7, "止损", text_size=size.small)
+    table.cell(info_table, 1, 7, str.tostring(math.round(sl_atr, 2)), text_size=size.small)
+    
+    table.cell(info_table, 0, 8, "入场条件", text_size=size.small)
+    cond = long_signal ? "🟢做多" : short_signal ? "🔴做空" : "—"
+    table.cell(info_table, 1, 8, cond, text_color=long_signal ? color.green : short_signal ? color.red : color.gray, text_size=size.small)
