@@ -1,0 +1,73 @@
+name: OKX Monitor (Push)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'okx_monitor.py'
+      - 'shared/**'
+      - 'monitor/**'
+      - 'analysis/**'
+      - 'tools/**'
+      - 'strategy/**'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests --quiet
+
+      - name: Get date
+        id: date
+        run: echo "date=$(TZ=Asia/Shanghai date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
+      - name: Download today's existing CSV
+        uses: actions/download-artifact@v4
+        with:
+          name: scan-data-${{ steps.date.outputs.date }}
+          path: okx_data/scans/
+        continue-on-error: true
+
+      - name: Download cooldown state
+        uses: actions/download-artifact@v4
+        with:
+          name: cooldown-state
+          path: okx_data/
+        continue-on-error: true
+
+      - name: Run monitor (appends to CSV)
+        run: python okx_monitor.py
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK || '' }}
+
+      - name: Upload cumulative CSV
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-data-${{ steps.date.outputs.date }}
+          path: okx_data/scans/${{ steps.date.outputs.date }}.csv
+          if-no-files-found: warn
+          overwrite: true
+
+      - name: Upload cooldown state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cooldown-state
+          path: |
+            okx_data/.last_push
+            okx_data/.symbol_cooldown.json
+          if-no-files-found: warn
+          overwrite: true

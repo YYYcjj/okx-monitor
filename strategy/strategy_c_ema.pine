@@ -1,0 +1,68 @@
+//@version=6
+// 策略C: EMA趋势跟踪 (60天回测胜率44.1%, 3191信号)
+strategy("OKX-策略C(EMA趋势)", overlay=true,
+  initial_capital=1000, default_qty_type=strategy.percent_of_equity,
+  default_qty_value=100, commission_value=0.05)
+
+// ── 参数 ──
+ema_fast  = input.int(12, "EMA快线")
+ema_slow  = input.int(26, "EMA慢线")
+adx_len   = input.int(14, "ADX周期")
+adx_min   = input.int(20, "ADX最小", minval=10, maxval=35)
+tf_count  = input.int(2, "需同向TF数", minval=1, maxval=3)
+tp_pct    = input.float(5.0, "止盈%", step=0.5) / 100
+sl_pct    = input.float(3.0, "止损%", step=0.5) / 100
+
+// ── 多时间框架EMA ──
+// 当前图表TF
+ema1_f = ta.ema(close, ema_fast)
+ema1_s = ta.ema(close, ema_slow)
+dir1 = ema1_f > ema1_s ? 1 : -1
+
+// 4H EMA
+[ema4_f, ema4_s] = request.security(syminfo.tickerid, "240",
+  [ta.ema(close, ema_fast), ta.ema(close, ema_slow)])
+dir4 = ema4_f > ema4_s ? 1 : -1
+
+// 日线 EMA
+[emaD_f, emaD_s] = request.security(syminfo.tickerid, "D",
+  [ta.ema(close, ema_fast), ta.ema(close, ema_slow)])
+dirD = emaD_f > emaD_s ? 1 : -1
+
+// TF计数
+bullCount = (dir1>0?1:0) + (dir4>0?1:0) + (dirD>0?1:0)
+bearCount = (dir1<0?1:0) + (dir4<0?1:0) + (dirD<0?1:0)
+
+// 日线ADX
+[_, _, adx_d] = request.security(syminfo.tickerid, "D",
+  ta.dmi(adx_len, adx_len))
+
+// ── 信号 ──
+longCondition  = bullCount >= tf_count and adx_d > adx_min
+shortCondition = bearCount >= tf_count and adx_d > adx_min
+
+// ── 入场 ──
+if longCondition and strategy.position_size == 0
+    strategy.entry("L", strategy.long)
+if shortCondition and strategy.position_size == 0
+    strategy.entry("S", strategy.short)
+
+// ── 出场: EMA交叉反转 ──
+strategy.close("L", when=bullCount < tf_count)
+strategy.close("S", when=bearCount < tf_count)
+
+// 止盈止损
+strategy.exit("XL", "L", limit=close*(1+tp_pct), stop=close*(1-sl_pct))
+strategy.exit("XS", "S", limit=close*(1-tp_pct), stop=close*(1+sl_pct))
+
+// ── 可视化 ──
+plot(ema1_f, "EMA快", color.blue, 1)
+plot(ema1_s, "EMA慢", color.orange, 1)
+
+// 背景色标记趋势
+bgcolor(bullCount>=3 ? color.new(color.green, 90) : bullCount>=2 ? color.new(color.green, 95) : na)
+bgcolor(bearCount>=3 ? color.new(color.red, 90) : bearCount>=2 ? color.new(color.red, 95) : na)
+
+// 信号标记
+plotshape(longCondition and not longCondition[1], "做多", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(shortCondition and not shortCondition[1], "做空", shape.triangledown, location.abovebar, color.red, size=size.small)

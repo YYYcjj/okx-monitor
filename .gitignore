@@ -8,6 +8,14 @@ venv/
 .env
 *.env
 !*.env.example
+.okx_credentials
+.pushplus_token
+.wecom_webhook
+.serverchan_key
+.last_push
+.last_scan_trigger
+.last_retrigger
+.alert_cache.json
 
 # IDE
 .idea/
@@ -18,12 +26,26 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Data files (too large / generated)
+# Data & Logs
 okx_data/cache/
 okx_data/scans/
+monitor_log.txt
+*.csv
+okx_history.zip
 
 # Node
 node_modules/
 
 # Temp
 /tmp/
+
+# WorkBuddy
+.workbuddy/
+
+# SSH / Keys
+github_key
+github_key.pub
+.ssh_tmp/
+
+# Tools cache
+tools/scan_history.json

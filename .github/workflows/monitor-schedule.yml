@@ -1,0 +1,130 @@
+name: Monitor Schedule
+
+on:
+  schedule:
+    - cron: '0,15,30,45 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests urllib3 --quiet
+
+      - name: Get date
+        id: date
+        run: echo "date=$(TZ=Asia/Shanghai date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
+      - name: Download today's existing CSV
+        uses: actions/download-artifact@v4
+        with:
+          name: scan-data-${{ steps.date.outputs.date }}
+          path: okx_data/scans/
+        continue-on-error: true
+
+      - name: Run monitor
+        id: monitor
+        run: python okx_monitor.py
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK || '' }}
+
+      - name: Commit cooldown state
+        if: always()
+        run: |
+          git config user.name "OKX Bot"
+          git config user.email "bot@okx.local"
+          git add .cooldown.json 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No cooldown changes"
+          else
+            git commit -m "[auto] 冷却状态更新" && git push
+          fi
+
+      - name: Upload cumulative CSV
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-data-${{ steps.date.outputs.date }}
+          path: okx_data/scans/${{ steps.date.outputs.date }}.csv
+          if-no-files-found: warn
+          overwrite: true
+
+      - name: Generate viewer HTML
+        if: always()
+        run: |
+          python analysis/entry_exit_analysis.py
+          python analysis/pairwise_winrate.py
+          python analysis/build_viewer.py
+
+      - name: Upload viewer HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewer
+          path: okx_data/viewer.html
+          if-no-files-found: warn
+          overwrite: true
+
+  deploy-pages:
+    needs: scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    continue-on-error: true
+    steps:
+      - name: Download viewer HTML
+        uses: actions/download-artifact@v4
+        with:
+          name: viewer
+          path: pages/
+
+      - name: Deploy to gh-pages
+        run: |
+          mkdir -p /tmp/deploy
+          cp pages/viewer.html /tmp/deploy/index.html
+          cd /tmp/deploy
+          git init
+          git checkout -b gh-pages
+          git config user.name "OKX Bot"
+          git config user.email "bot@okx.local"
+          git add index.html
+          git commit -m "Deploy viewer" || true
+          git push -f https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git gh-pages 2>/dev/null || echo "Pages push skipped (private repo or Pages not enabled)"
+
+  refresh-symbols:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    if: github.event_name == 'schedule'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests urllib3 --quiet
+      - run: python tools/pair_scanner.py
+      - name: Commit updated SYMBOLS.txt
+        run: |
+          git config user.name "OKX Bot"
+          git config user.email "bot@okx.local"
+          git add SYMBOLS.txt FIXED_SYMBOLS.txt 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No symbol changes"
+          else
+            git commit -m "[auto] 每日热门品种更新" && git push
+          fi
