@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Env / Secrets
+.env
+*.env
+!*.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (too large / generated)
+okx_data/cache/
+okx_data/scans/
+
+# Node
+node_modules/
+
+# Temp
+/tmp/
