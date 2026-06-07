@@ -47,25 +47,50 @@ def fetch_ohlcv(symbol, bar="1H", limit=300, before=None):
     return None
 
 
-def fetch_extended(symbol, bars=1000):
-    """拉取超过300根K线"""
-    all_candles = []
-    before = None
-    while len(all_candles) < bars:
-        batch = fetch_ohlcv(symbol, "1H", limit=300, before=before)
-        if not batch:
-            break
-        if not all_candles:
-            all_candles = batch
-        else:
-            # 去重
-            new = [c for c in batch if c["ts"] < all_candles[0]["ts"]]
-            all_candles = new + all_candles
-        if len(batch) < 300:
-            break
-        before = str(all_candles[0]["ts"])
-        time.sleep(0.3)
-    return all_candles
+def fetch_extended(symbol, bars=2000):
+    """拉取指定数量的1H K线，优先用 yfinance，备用 CryptoCompare"""
+    coin = symbol.replace("-USDT-SWAP", "").replace("-USDT", "")
+    
+    # 尝试 yfinance（支持更多历史数据）
+    try:
+        import yfinance as yf
+        ticker = f"{coin}-USD"
+        # 1H data, max 730 bars through yfinance
+        df = yf.download(ticker, period="60d", interval="1h", progress=False, auto_adjust=True)
+        if not df.empty:
+            candles = []
+            for idx, row in df.iterrows():
+                candles.append({
+                    "h": float(row["High"]), "l": float(row["Low"]),
+                    "c": float(row["Close"]), "o": float(row["Open"]),
+                    "ts": int(idx.timestamp() * 1000),
+                    "vol": float(row["Volume"]),
+                })
+            return candles
+    except Exception:
+        pass
+    
+    # 备用: CryptoCompare
+    try:
+        limit = min(bars, 2000)
+        url = f"https://min-api.cryptocompare.com/data/v2/histohour"
+        params = {"fsym": coin, "tsym": "USDT", "limit": limit}
+        resp = requests.get(url, params=params, timeout=30, proxies={"http": None, "https": None})
+        data = resp.json()
+        if data.get("Response") == "Success":
+            candles = []
+            for d in data["Data"]["Data"]:
+                candles.append({
+                    "h": d["high"], "l": d["low"], "c": d["close"],
+                    "o": d["open"], "ts": d["time"] * 1000,
+                    "vol": d["volumefrom"],
+                })
+            return candles
+    except Exception:
+        pass
+    
+    # 最终备用: OKX
+    return fetch_ohlcv(symbol, "1H", limit=min(bars, 300)) or []
 
 
 # ═══ 指标计算 ═══
@@ -245,36 +270,38 @@ def backtest(symbol, candles, params):
     st_line, st_trend = calc_supertrend(candles, params["st_period"], params["st_mult"])
     swings = find_swing_levels(candles, params["zone_depth"])
 
-    # Simulate higher timeframe by downsampling
-    dmi_4h = estimate_htf_dmi(candles, dmi, 4)
-    srsi_4h = estimate_htf_srsi(closes, srsi, 4)
-    dmi_1d = estimate_htf_dmi(candles, dmi, 24)
-    srsi_1d = estimate_htf_srsi(closes, srsi, 24)
+    # Use real SRSI from 1H for all TF but preserve extremes better
+    # by using the raw values directly (not averaged)
+    srsi_1d = srsi  # just use 1H values since SRSI is oscillatory
 
     w = params["dmi_weights"]
     trades = []
-    position = None  # {"type": "long"/"short", "entry": price, "entry_i": idx, "atr": float, "sl": float, "tp": float, "tp_hit": bool, "half": bool}
+    position = None
 
-    for i in range(24, n):  # start after enough data
+    for i in range(24, n):
         if srsi[i] is None: continue
 
         # ═══ scoring ═══
-        d1h = dmi[i]; d4h = dmi_4h[i]; d1d = dmi_1d[i]
+        d1h = dmi[i]
+        # 4H/1D DMI via majority vote (this works OK for direction)
+        seg4 = dmi[max(0,i-4):i+1]; l4 = sum(1 for d in seg4 if d==1); s4 = sum(1 for d in seg4 if d==-1)
+        d4h = 1 if l4 >= s4 else -1
+        seg24 = dmi[max(0,i-24):i+1]; l24 = sum(1 for d in seg24 if d==1); s24 = sum(1 for d in seg24 if d==-1)
+        d1d = 1 if l24 >= s24 else -1
+
         bull = (1 if d1h == 1 else 0)*w[0] + (1 if d4h == 1 else 0)*w[1] + (1 if d1d == 1 else 0)*w[2]
         bear = (1 if d1h == -1 else 0)*w[0] + (1 if d4h == -1 else 0)*w[1] + (1 if d1d == -1 else 0)*w[2]
 
-        srsi_1h_v = srsi[i]; srsi_4h_v = srsi_4h[i]; srsi_1d_v = srsi_1d[i]
-        if srsi_1h_v is not None:
-            if srsi_1h_v < 20: bull += w[0]
-            if srsi_1h_v > 80: bear += w[0]
-        if srsi_4h_v is not None:
-            if srsi_4h_v < 20: bull += w[1]
-            if srsi_4h_v > 80: bear += w[1]
-        if srsi_1d_v is not None:
-            if srsi_1d_v < 20: bull += w[2]
-            elif srsi_1d_v < 30: bull += 1
-            if srsi_1d_v > 80: bear += w[2]
-            elif srsi_1d_v > 70: bear += 1
+        # SRSI: use same 1H values for all TF, extremes propagate
+        s = srsi[i]
+        if s < 20: bull += w[0]
+        if s > 80: bear += w[0]
+        if s < 20: bull += w[1]   # 4H
+        if s > 80: bear += w[1]   # 4H
+        if s < 20: bull += w[2]   # 1D
+        elif s < 30: bull += 1    # 1D
+        if s > 80: bear += w[2]   # 1D
+        elif s > 70: bear += 1    # 1D
 
         threshold = params["alert_threshold"]
         near_flag = abs(closes[i] - st_line[i]) / st_line[i] <= params["near_pct"] if st_line[i] > 0 else False
@@ -374,6 +401,20 @@ def backtest(symbol, candles, params):
                 })
                 if not p["half"] or exit_reason in ("tp_weak", "sl"):
                     position = None
+
+    # 数据结束，强制平仓
+    if position is not None:
+        p = position
+        last_close = closes[-1]
+        pnl = (last_close - p["entry"]) / p["entry"] if p["type"] == "long" else (p["entry"] - last_close) / p["entry"]
+        if p.get("half"):
+            pnl *= 0.5
+        trades.append({
+            "type": p["type"], "entry": p["entry"], "exit": last_close,
+            "exit_reason": "end_of_data", "pnl_pct": pnl,
+            "entry_i": p["entry_i"], "exit_i": n-1,
+            "holding_bars": n-1 - p["entry_i"], "half": False,
+        })
 
     return trades
 
