@@ -28,8 +28,8 @@ ALERT_THRESHOLD = 9
 MAX_RISK_PCT = 0.02  # 每笔最大亏损2%
 SL_ATR_MULT = 2.0  # 止损ATR倍数
 
-# 14币种池
-SYMBOLS_FILE = "/Users/yyy/WorkBuddy/2026-06-03-21-23-44/okx-monitor/SYMBOLS.txt"
+# 币种池（从 SYMBOLS.txt 动态读取）
+SYMBOLS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SYMBOLS.txt")
 with open(SYMBOLS_FILE) as f:
     SYMBOLS = [line.strip() for line in f if line.strip()]
 
