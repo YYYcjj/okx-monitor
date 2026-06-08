@@ -1,0 +1,45 @@
+name: OKX 策略监控
+
+on:
+  schedule:
+    # 每15分钟运行（UTC时间，对应 CST 7:15-23:45）
+    - cron: '*/15 23,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 * * *'
+  workflow_dispatch:  # 手动触发
+
+permissions:
+  contents: write  # 允许推送冷却状态 & 扫描数据
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: pip install requests
+
+      - name: 运行策略扫描
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
+          OKX_SECRET: ${{ secrets.OKX_SECRET }}
+          OKX_PASSPHRASE: ${{ secrets.OKX_PASSPHRASE }}
+        run: python3 okx_monitor.py
+
+      - name: 持久化冷却状态
+        run: |
+          if [ -n "$(git status --porcelain .cooldown.json okx_data/ monitor_log.txt 2>/dev/null)" ]; then
+            git config user.name "OKX Bot"
+            git config user.email "bot@okx-monitor.local"
+            git add .cooldown.json okx_data/ monitor_log.txt 2>/dev/null || true
+            git commit -m "📊 自动: 更新扫描数据 & 冷却状态 [skip ci]" || true
+            git pull --rebase origin main || true
+            git push origin main || true
+          fi
