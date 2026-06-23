@@ -2,7 +2,8 @@ name: Monitor Schedule
 
 on:
   schedule:
-    - cron: '0,15,30,45 * * * *'
+    # 早上6点开始第一次推送，之后每2小时一次（6,8,10,12,14,16,18,20,22），0-5点不推送
+    - cron: '0 6,8,10,12,14,16,18,20,22 * * *'
   workflow_dispatch:
 
 jobs:
