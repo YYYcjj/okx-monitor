@@ -297,12 +297,25 @@ ALERT_THRESHOLD = 9
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # 动态品种列表: 优先读取 SYMBOLS.txt（由 tools/pair_scanner.py 每天生成）
+# 固定品种（始终监控）来自 FIXED_SYMBOLS.txt
+FIXED_FILE = os.path.join(PROJECT_ROOT, "FIXED_SYMBOLS.txt")
+fixed_list = []
+if os.path.exists(FIXED_FILE):
+    with open(FIXED_FILE) as f:
+        fixed_list = [l.strip() for l in f if l.strip() and not l.startswith('#')]
+
+# 今日 2 个热点（来自 SYMBOLS.txt，由 pair_scanner.py 每天更新）
+# 取固定列表之外的前 2 个评分最高品种
 DYNAMIC_FILE = os.path.join(PROJECT_ROOT, "SYMBOLS.txt")
+hot_list = []
 if os.path.exists(DYNAMIC_FILE):
     with open(DYNAMIC_FILE) as f:
         dynamic = [l.strip() for l in f if l.strip() and not l.startswith('#')]
-    if dynamic:
-        SYMBOLS = dynamic
+    # 排除已在固定清单里的，取前 2 个
+    hot_list = [s for s in dynamic if s not in fixed_list][:2]
+
+# 最终监控列表 = 固定 8 + 热点 2
+SYMBOLS = fixed_list + hot_list
 
 # ── 通知渠道 ──
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "").strip()

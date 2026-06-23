@@ -165,7 +165,7 @@ def main():
     
     # 写入 SYMBOLS.txt（固定优先，动态补充，总数≤25）
     with open(OUTPUT, 'w') as f:
-        f.write('\n'.join(final[:25]) + '\n')
+        f.write('\n'.join(selected[:10]) + '\n')
     
     print(f"\n✅ 共 {len(final[:25])} 个品种 → {OUTPUT}")
     fixed_names = [s.replace('-USDT-SWAP','') for s in fixed_list]
