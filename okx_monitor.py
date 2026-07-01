@@ -130,6 +130,9 @@ def trend_dmi(candles, period=14):
         adx = (adx * (period - 1) + dx_vals[i]) / period
     last_pdi = spdm / atr_s * 100 if atr_s > 0 else 0
     last_mdi = smdm / atr_s * 100 if atr_s > 0 else 0
+    # ADX < 20: 无趋势/震荡，方向信号不可靠
+    if adx < 20:
+        return "震荡", adx, atr_s
     return ("多" if last_pdi > last_mdi else "空"), adx, atr_s
 
 # ── 摆动点方向 ──
@@ -149,9 +152,9 @@ def trend_swing(candles):
     h2, h1 = swing_highs[-2], swing_highs[-1]
     l2, l1 = swing_lows[-2], swing_lows[-1]
     highs_up = h1 > h2; lows_ok_ = l1 >= l2 - atr
-    if highs_up and lows_ok_: return "多"
-    elif not highs_up and not lows_ok_: return "空"
-    return "多" if lows_ok_ else "空"
+    if highs_up and lows_ok_: return "多"       # HH+HL → 上升趋势
+    elif not highs_up and not lows_ok_: return "空"  # LH+LL → 下降趋势
+    return "震荡"  # HH+LL 或 LH+HL：高低点矛盾，趋势不明确
 
 # ── 多标准评分 ──
 def calc_multi_score(trends_dmi, trends_sw, srsis, adxs):
@@ -526,7 +529,7 @@ def send_high_alert(alerts, now_str):
 def _send_pushplus_full(results, now_str):
     url = "http://www.pushplus.plus/send"
     alert_count = sum(1 for r in results if r.get("bull",0) >= ALERT_THRESHOLD or r.get("bear",0) >= ALERT_THRESHOLD)
-    dcol = {"多":"#27ae60","空":"#e74c3c","N/A":"#999"}
+    dcol = {"多":"#27ae60","空":"#e74c3c","N/A":"#999","震荡":"#f0ad4e"}
     def sc(v):
         try:
             n = float(v)
@@ -694,14 +697,18 @@ def scan_symbol(sym):
         bolls[tf_label] = boll_dir
         macds[tf_label] = round(macd_val, 4) if macd_val is not None else None
         time.sleep(0.15)
-    # 1D方向改用摆动点（价格跌破前低比DMI更可靠）
-    trends["1D"] = trends_sw["1D"] if trends_sw.get("1D", "N/A") != "N/A" else trends["1D"]
-    # 趋势过滤：EMA空头排列 + 多数日线下跌 → 强制判空
-    if tf_label == "1D" and trends["1D"] == "多":
+    # 1D方向优先用摆动点（价格高低点结构比DMI可靠）
+    sw_1d = trends_sw.get("1D", "N/A")
+    trends["1D"] = sw_1d if sw_1d not in ("N/A", "震荡") else trends["1D"]
+    # 趋势过滤：EMA+近10天涨跌天数双向修正（摆动点可能滞后，EMA更敏感）
+    if len(closes) > 10:
         ema_1d = trend_ema_cross(candles)
-        bearish_days = sum(1 for i in range(max(0, len(closes)-10), len(closes)) if closes[i] < closes[i-1]) if len(closes) > 10 else 0
-        if ema_1d == "空" and bearish_days >= 7:
+        bearish_days = sum(1 for i in range(-10, 0) if closes[i] < closes[i-1])
+        bullish_days = sum(1 for i in range(-10, 0) if closes[i] > closes[i-1])
+        if trends["1D"] == "多" and ema_1d == "空" and bearish_days >= 7:
             trends["1D"] = "空"
+        elif trends["1D"] == "空" and ema_1d == "多" and bullish_days >= 7:
+            trends["1D"] = "多"
     (dmi_b, dmi_s), (adx_b, adx_s), (sw_b, sw_s) = calc_multi_score(trends, trends_sw, srsis, adxs)
     row["trends"] = trends; row["trends_sw"] = trends_sw
     row["srsis"] = srsis; row["adxs"] = adxs
