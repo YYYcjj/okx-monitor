@@ -139,9 +139,8 @@ def trend_swing(candles):
     h2, h1 = swing_highs[-2], swing_highs[-1]
     l2, l1 = swing_lows[-2], swing_lows[-1]
     highs_up = h1 > h2; lows_ok_ = l1 >= l2 - atr
-    if highs_up and lows_ok_: return "多"       # HH+HL → 上升趋势
-    if not highs_up and not lows_ok_: return "空"  # LH+LL → 下降趋势
-    # 混合信号（HH+LL 或 LH+HL）：用EMA交叉判断更可能的方向
+    if highs_up and lows_ok_: return "多"
+    if not highs_up and not lows_ok_: return "空"
     ema_dir = trend_ema_cross(candles)
     return ema_dir if ema_dir != "N/A" else ("多" if highs_up else "空")
 
@@ -640,6 +639,20 @@ def scan_symbol(sym):
         bolls[tf_label] = boll_dir
         macds[tf_label] = round(macd_val, 4) if macd_val is not None else None
         time.sleep(0.15)
+    for tf in ["1H", "4H", "1D"]:
+        votes = [
+            trends.get(tf, "N/A"),
+            trends_sw.get(tf, "N/A"),
+            emas.get(tf, "N/A"),
+            cci_dirs.get(tf, "N/A"),
+            bolls.get(tf, "N/A"),
+        ]
+        valid = [v for v in votes if v in ("多", "空")]
+        if len(valid) >= 3:
+            bull = valid.count("多")
+            bear = valid.count("空")
+            if bull != bear:
+                trends[tf] = "多" if bull > bear else "空"
     sw_1d = trends_sw.get("1D", "N/A")
     trends["1D"] = sw_1d if sw_1d != "N/A" else trends["1D"]
     if len(closes) > 10:
