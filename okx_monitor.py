@@ -258,10 +258,34 @@ def trend_cci(candles):
     if cci > 0: return "多"
     return "空"
 
-SYMBOLS = [
-    "HOME-USDT-SWAP", "HUMA-USDT-SWAP", "BTC-USDT-SWAP", "APR-USDT-SWAP",
-    "ORDI-USDT-SWAP", "PUMP-USDT-SWAP", "APT-USDT-SWAP"
+# ── 动态推荐候选池（每次扫描时评估，推送 Top 3）──
+CANDIDATES = [
+    "SHIB-USDT-SWAP", "GALA-USDT-SWAP", "DOGE-USDT-SWAP",
+    "ADA-USDT-SWAP", "SOL-USDT-SWAP", "LTC-USDT-SWAP",
+    "XRP-USDT-SWAP", "AVAX-USDT-SWAP"
 ]
+
+def scan_candidates():
+    results = []
+    existing = {s.replace("-USDT-SWAP","").replace("-USDT","") 
+                for s in SYMBOLS}
+    for sym in CANDIDATES:
+        name = sym.replace("-USDT-SWAP","")
+        if name in existing:
+            continue
+        candles = fetch_ohlcv(sym, "4H", 100)
+        if not candles:
+            continue
+        d, adx, _ = trend_dmi(candles)
+        if adx is None:
+            continue
+        quality = min(adx/30, 1)
+        results.append({"name": name, "quality": round(quality, 2), 
+                       "adx": round(adx, 1), "trend": d})
+        time.sleep(0.1)
+    results.sort(key=lambda x: -x["quality"])
+    return results[:3]
+
 ALERT_THRESHOLD = 9
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -457,9 +481,9 @@ def next_hour_cst():
     nh = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     return nh.strftime("%H:%M")
 
-def send_report(results, now_str):
+def send_report(results, now_str, candidates=None):
     if PUSHPLUS_TOKEN:
-        return _send_pushplus_full(results, now_str)
+        return _send_pushplus_full(results, now_str, candidates)
     if WECOM_WEBHOOK:
         return _send_wecom(results, now_str)
     return False
@@ -471,7 +495,7 @@ def send_high_alert(alerts, now_str):
         return False
     return _send_pushplus_alert(alerts, now_str)
 
-def _send_pushplus_full(results, now_str):
+def _send_pushplus_full(results, now_str, candidates=None):
     url = "http://www.pushplus.plus/send"
     alert_count = sum(1 for r in results if r.get("bull",0) >= ALERT_THRESHOLD or r.get("bear",0) >= ALERT_THRESHOLD)
     dcol = {"多":"#27ae60","空":"#e74c3c","N/A":"#999"}
@@ -550,8 +574,18 @@ def _send_pushplus_full(results, now_str):
         else:
             htm += f'<tr style="background:#fff"><td style="padding:1px 4px">{nm}</td><td style="padding:1px 4px;color:{c}">{stars}</td><td style="padding:1px 4px;color:{c};font-size:10px">{bar} {q:.2f}</td></tr>'
     htm += '</table></div>'
-    htm += '<div style="margin-top:8px;padding:6px 8px;background:#fff8e1;border-radius:4px;font-size:10px">'
-    htm += '<b>💡 建议关注:</b> SHIB / GALA / DOGE — 趋势更强、插针更少</div>'
+    if candidates:
+        htm += '<div style="margin-top:8px;padding:6px 8px;background:#f0fdf4;border-radius:4px;font-size:10px">'
+        htm += '<b>💡 今日优质品种:</b> '
+        recs = []
+        for c in candidates:
+            trend_icon = "📈" if c["trend"] == "多" else "📉"
+            recs.append(f'{trend_icon} {c["name"]}(ADX={c["adx"]:.0f})')
+        htm += " · ".join(recs)
+        htm += '</div>'
+    else:
+        htm += '<div style="margin-top:8px;padding:6px 8px;background:#fff8e1;border-radius:4px;font-size:10px">'
+        htm += '<b>💡 建议关注:</b> SHIB / GALA / DOGE — 趋势更强、插针更少</div>'
     htm += f'<hr style="border:0;border-top:1px solid #eee;margin:8px 0"><p style="color:#999;font-size:10px;margin:1px 0">📐 DMI/ADX | 15min扫描 · 日间整点推送 | ≥{ALERT_THRESHOLD}预警</p><p style="color:#999;font-size:10px;margin:1px 0">🔔 下轮 {(datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=1)).strftime("%H:%M")} CST</p></div>'
     payload = {"token": PUSHPLUS_TOKEN, "title": f"OKX {alert_count}预警" if alert_count else "OKX 策略扫描", "content": htm, "template": "html"}
     try:
@@ -794,7 +828,13 @@ def main():
     global_ts, sym_cooldowns = load_cooldown_state()
     if is_full_push:
         print(f"\n📤 日间整点，推送完整报表...")
-        pushed = send_report(results, now_str)
+        print(f"  🔍 扫描候选池...")
+        candidates = scan_candidates()
+        if candidates:
+            for c in candidates:
+                t = "📈" if c["trend"] == "多" else "📉"
+                print(f"    {t} {c['name']}: ADX={c['adx']:.0f} q={c['quality']:.2f}")
+        pushed = send_report(results, now_str, candidates)
         global_ts = time.time() if pushed else global_ts
     elif alerts:
         new_alerts = []
