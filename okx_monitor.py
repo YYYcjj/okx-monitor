@@ -535,6 +535,23 @@ def _send_pushplus_full(results, now_str):
         sw = f"多{r['bull_sw']}" if r['bull_sw']>=r['bear_sw'] else f"空{r['bear_sw']}"
         htm += f'<tr style="background:{bg}"><td style="padding:4px 3px;font-weight:bold">{nm}</td><td style="padding:4px 2px;text-align:center">{dmi}</td><td style="padding:4px 2px;text-align:center">{adx}</td><td style="padding:4px 2px;text-align:center">{sw}</td></tr>'
     htm += '</table></div>'
+    ranked = sorted([r for r in results if "_error" not in r],
+        key=lambda r: r.get("quality", 0), reverse=True)
+    htm += '<div style="margin-top:10px"><p style="font-size:11px;font-weight:bold;color:#666;margin:0 0 4px">📈 趋势质量 (ADX强度)</p>'
+    htm += '<table style="width:100%;border-collapse:collapse;font-size:11px">'
+    for i, r in enumerate(ranked):
+        q = r.get("quality", 0)
+        stars = "★★★" if q > 0.6 else ("★★" if q > 0.4 else "★")
+        nm = r["symbol"].replace("-SWAP","").replace("-USDT","")
+        bar = "█" * max(1, int(q*12))
+        c = "#27ae60" if q > 0.6 else ("#f0ad4e" if q > 0.4 else "#e74c3c")
+        if i == 0:
+            htm += f'<tr style="background:#fff"><td style="padding:2px 4px;font-weight:bold">{nm}</td><td style="padding:2px 4px;color:{c}">{stars}</td><td style="padding:2px 4px;color:{c};font-size:10px">{bar} {q:.2f}</td></tr>'
+        else:
+            htm += f'<tr style="background:#fff"><td style="padding:1px 4px">{nm}</td><td style="padding:1px 4px;color:{c}">{stars}</td><td style="padding:1px 4px;color:{c};font-size:10px">{bar} {q:.2f}</td></tr>'
+    htm += '</table></div>'
+    htm += '<div style="margin-top:8px;padding:6px 8px;background:#fff8e1;border-radius:4px;font-size:10px">'
+    htm += '<b>💡 建议关注:</b> SHIB / GALA / DOGE — 趋势更强、插针更少</div>'
     htm += f'<hr style="border:0;border-top:1px solid #eee;margin:8px 0"><p style="color:#999;font-size:10px;margin:1px 0">📐 DMI/ADX | 15min扫描 · 日间整点推送 | ≥{ALERT_THRESHOLD}预警</p><p style="color:#999;font-size:10px;margin:1px 0">🔔 下轮 {(datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=1)).strftime("%H:%M")} CST</p></div>'
     payload = {"token": PUSHPLUS_TOKEN, "title": f"OKX {alert_count}预警" if alert_count else "OKX 策略扫描", "content": htm, "template": "html"}
     try:
@@ -671,6 +688,9 @@ def scan_symbol(sym):
     row["bull"] = dmi_b; row["bear"] = dmi_s
     row["bull_adx"] = adx_b; row["bear_adx"] = adx_s
     row["bull_sw"] = sw_b; row["bear_sw"] = sw_s
+    adx4 = adxs.get("4H", 0) or 0
+    adx1 = adxs.get("1D", 0) or 0
+    row["quality"] = round((min(adx4/30, 1) + min(adx1/30, 1)) / 2, 3)
     return row
 
 def fmt_srsi(v):
