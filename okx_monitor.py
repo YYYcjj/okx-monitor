@@ -4,7 +4,7 @@ OKX 策略监控 v2.1
 - 方向: DMI/ADX (Wilder) + 摆动点+ATR (对比)
 - StochRSI: (K+D)/2, Wilder平滑
 - 评分: 方向分 1H=1, 4H=1, 1D=2 + SRSI极端值加分
-- 调度: 每15分钟扫描 → 日间(7-24)整点推送全量 / 夜间(0-7)仅高分预警
+- 调度: 每15分钟扫描 → 日间(6-24)整点推送全量 / 夜间(0-6)仅高分预警
 - 文档: 所有扫描结果存入 okx_data/scans/YYYY-MM-DD.csv 供参数验证
 """
 import warnings
@@ -258,7 +258,6 @@ def trend_cci(candles):
     if cci > 0: return "多"
     return "空"
 
-# ── 动态推荐候选池（每次扫描时评估，推送 Top 3）──
 CANDIDATES = [
     "SHIB-USDT-SWAP", "GALA-USDT-SWAP", "DOGE-USDT-SWAP",
     "ADA-USDT-SWAP", "SOL-USDT-SWAP", "LTC-USDT-SWAP",
@@ -437,7 +436,7 @@ GITHUB_EVENT = os.environ.get("GITHUB_EVENT_NAME", "")
 
 def should_push_full(now):
     h, m = now.hour, now.minute
-    is_hourly = 7 <= h <= 23 and m <= 15
+    is_hourly = 6 <= h <= 23 and m <= 15
     is_schedule = GITHUB_EVENT in ("schedule", "workflow_dispatch", "")
     return is_hourly and is_schedule
 
@@ -474,7 +473,7 @@ def per_symbol_cooldown_ok(symbol, direction):
     return True
 
 def is_daytime(now):
-    return 7 <= now.hour <= 23
+    return 6 <= now.hour <= 23
 
 def next_hour_cst():
     now = datetime.now(timezone(timedelta(hours=8)))
@@ -756,7 +755,7 @@ def main():
     now = datetime.now(timezone(timedelta(hours=8)))
     now_str = now.strftime("%Y-%m-%d %H:%M CST")
     h, m = now.hour, now.minute
-    period_label = "日间" if 7 <= h <= 23 else "夜间"
+    period_label = "日间" if 6 <= h <= 23 else "夜间"
     is_full_push = should_push_full(now)
     print(f"\n{'='*60}")
     print(f"[{now_str}] {period_label}扫描 | 整点推送={'是' if is_full_push else '否'}")
