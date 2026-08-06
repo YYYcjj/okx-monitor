@@ -6,6 +6,7 @@ OKX 策略监控 v2.1
 - 评分: 方向分 1H=1, 4H=1, 1D=2 + SRSI极端值加分
 - 调度: 每15分钟扫描 → 日间(6-24)整点推送全量 / 夜间(0-6)仅高分预警
 - 文档: 所有扫描结果存入 okx_data/scans/YYYY-MM-DD.csv 供参数验证
+- 成交量分布: 基于1H K线计算POC/VA作为支撑阻力参考
 """
 import warnings
 warnings.filterwarnings("ignore")
@@ -28,7 +29,10 @@ def fetch_ohlcv(symbol, bar, limit=200, retries=3):
             if d.get("code") == "0":
                 candles = []
                 for c in d["data"]:
-                    candles.append({"h": float(c[2]), "l": float(c[3]), "c": float(c[4])})
+                    candles.append({
+                        "h": float(c[2]), "l": float(c[3]), "c": float(c[4]),
+                        "o": float(c[1]), "v": float(c[5])
+                    })
                 candles.reverse()
                 return candles
             return None
@@ -257,6 +261,57 @@ def trend_cci(candles):
     if cci < -100: return "多"
     if cci > 0: return "多"
     return "空"
+
+def calc_volume_profile(candles, buckets=12):
+    n = min(len(candles), 72)
+    recent = candles[-n:]
+    prices = [c["c"] for c in recent]
+    p_high = max(c["h"] for c in recent)
+    p_low = min(c["l"] for c in recent)
+    if p_high <= p_low:
+        return None
+    step = (p_high - p_low) / buckets
+    profile = [0.0] * buckets
+    for c in recent:
+        v = c.get("v", 0)
+        if v <= 0:
+            continue
+        h, l = c["h"], c["l"]
+        for b in range(buckets):
+            bucket_low = p_low + b * step
+            bucket_high = bucket_low + step
+            overlap_low = max(l, bucket_low)
+            overlap_high = min(h, bucket_high)
+            if overlap_high > overlap_low:
+                overlap_ratio = (overlap_high - overlap_low) / (h - l)
+                profile[b] += v * overlap_ratio
+    total_vol = sum(profile)
+    if total_vol == 0:
+        return None
+    poc_idx = profile.index(max(profile))
+    poc_price = p_low + (poc_idx + 0.5) * step
+    sorted_buckets = sorted(range(buckets), key=lambda i: -profile[i])
+    cum = 0
+    va_buckets = []
+    for b in sorted_buckets:
+        cum += profile[b]
+        va_buckets.append(b)
+        if cum / total_vol >= 0.70:
+            break
+    va_low = p_low + min(va_buckets) * step
+    va_high = p_low + (max(va_buckets) + 1) * step
+    cur_price = prices[-1]
+    pos = "POC上方" if cur_price > poc_price else ("POC下方" if cur_price < poc_price else "POC")
+    in_va = va_low <= cur_price <= va_high
+    dist_poc = abs(cur_price - poc_price) / poc_price * 100 if poc_price > 0 else 0
+    return {
+        "poc": round(poc_price, 8),
+        "va_low": round(va_low, 8),
+        "va_high": round(va_high, 8),
+        "pos": pos,
+        "in_va": in_va,
+        "dist_poc_pct": round(dist_poc, 1),
+    }
 
 CANDIDATES = [
     "SHIB-USDT-SWAP", "GALA-USDT-SWAP", "DOGE-USDT-SWAP",
@@ -573,6 +628,23 @@ def _send_pushplus_full(results, now_str, candidates=None):
         else:
             htm += f'<tr style="background:#fff"><td style="padding:1px 4px">{nm}</td><td style="padding:1px 4px;color:{c}">{stars}</td><td style="padding:1px 4px;color:{c};font-size:10px">{bar} {q:.2f}</td></tr>'
     htm += '</table></div>'
+    htm += '<div style="margin-top:10px"><p style="font-size:11px;font-weight:bold;color:#666;margin:0 0 4px">📊 成交量分布 (POC/VA)</p>'
+    htm += '<table style="width:100%;border-collapse:collapse;font-size:10px">'
+    htm += '<tr style="background:#f5f6fa;color:#666"><td style="padding:2px 3px">币种</td><td style="padding:2px 3px;text-align:center">POC(控点)</td><td style="padding:2px 3px;text-align:center">价值区域(VA)</td><td style="padding:2px 3px;text-align:center">位置</td></tr>'
+    for i, r in enumerate(ranked):
+        vp = r.get("volume_profile")
+        nm = r["symbol"].replace("-SWAP","").replace("-USDT","")
+        bg = "#fff" if i%2==0 else "#fafbfc"
+        if vp:
+            poc = f"{vp['poc']:.6g}"
+            va = f"{vp['va_low']:.6g}-{vp['va_high']:.6g}"
+            pos = vp["pos"]
+            in_va = "VA内" if vp["in_va"] else (f"{vp['dist_poc_pct']:.0f}%")
+            pos_color = "#27ae60" if pos == "POC上方" else ("#e74c3c" if pos == "POC下方" else "#333")
+            htm += f'<tr style="background:{bg}"><td style="padding:2px 3px;font-weight:bold">{nm}</td><td style="padding:2px 3px;text-align:center">{poc}</td><td style="padding:2px 3px;text-align:center;font-size:9px">{va}</td><td style="padding:2px 3px;text-align:center;color:{pos_color}">{pos} {in_va}</td></tr>'
+        else:
+            htm += f'<tr style="background:{bg}"><td style="padding:2px 3px;font-weight:bold">{nm}</td><td colspan="3" style="padding:2px 3px;text-align:center;color:#999">N/A</td></tr>'
+    htm += '</table></div>'
     if candidates:
         htm += '<div style="margin-top:8px;padding:6px 8px;background:#f0fdf4;border-radius:4px;font-size:10px">'
         htm += '<b>💡 今日优质品种:</b> '
@@ -661,8 +733,11 @@ def scan_symbol(sym):
     row = {"symbol": sym}
     trends = {}; trends_sw = {}; srsis = {}; adxs = {}
     emas = {}; ccis = {}; cci_dirs = {}; bbps = {}; bolls = {}; macds = {}
+    candles_1h = None
     for tf_label, bar in [("1H", "1H"), ("4H", "4H"), ("1D", "1D")]:
         candles = fetch_ohlcv(sym, bar)
+        if tf_label == "1H":
+            candles_1h = candles
         if not candles or len(candles) < 20:
             trends[tf_label] = "N/A"; trends_sw[tf_label] = "N/A"
             srsis[tf_label] = None; adxs[tf_label] = None
@@ -724,6 +799,8 @@ def scan_symbol(sym):
     adx4 = adxs.get("4H", 0) or 0
     adx1 = adxs.get("1D", 0) or 0
     row["quality"] = round((min(adx4/30, 1) + min(adx1/30, 1)) / 2, 3)
+    vp = calc_volume_profile(candles_1h) if candles_1h else None
+    row["volume_profile"] = vp
     return row
 
 def fmt_srsi(v):
