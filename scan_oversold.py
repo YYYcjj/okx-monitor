@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Extreme SRSI Scanner v2.1 — OKX成交量Top100
-(4H<10+1D<10) OR (4H>90+1D>90) | NoSpikes | TrendAligned | ADX>15
+Extreme SRSI Scanner v2.2 — OKX成交量Top100
+(4H<10+1D<10) OR (4H>90+1D>90) | NoSpikes only
 """
 import requests, time, json, os
 from datetime import datetime, timezone, timedelta
@@ -71,13 +71,6 @@ def calc_adx(candles,period=14):
     for i in range(period,len(dxv)):av=(av*(period-1)+dxv[i])/period
     return av,sp/atrs*100 if atrs>0 else 0,sm/atrs*100 if atrs>0 else 0
 
-def trend_ema(candles,fast=12,slow=26):
-    cl=[c["c"]for c in candles];k=2/(fast+1);ef=sum(cl[:fast])/fast
-    for p in cl[fast:]:ef=p*k+ef*(1-k)
-    k2=2/(slow+1);es=sum(cl[:slow])/slow
-    for p in cl[slow:]:es=p*k2+es*(1-k2)
-    return "Long" if ef>es else "Short"
-
 def wick(candles):
     ra=[];sp=0
     for c in candles[-20:]:
@@ -111,15 +104,15 @@ def main():
         if s4 is None or s1 is None:continue
         ovs=s4<10 and s1<10;ovb=s4>90 and s1>90
         if not ovs and not ovb:continue
-        adx4,_,_=calc_adx(c4);wa,ws=wick(c4);tr=trend_ema(c4)if adx4 and adx4>0 else"N/A"
-        pr=cl4[-1];trq="Short"if ovs else"Long"
-        ax=min(1,(adx4 or 0)/30)*0.35;ws_=max(0,1-wa/3)*0.25;ss_=max(0,1-ws*5/20)*0.15
-        es=max(0,(10-s4)/10)*0.15+max(0,(10-s1)/10)*0.10 if ovs else max(0,(s4-90)/10)*0.15+max(0,(s1-90)/10)*0.10
-        sc=round(ax+ws_+ss_+es,3);tok="OK"if(tr==trq and adx4 and adx4>15)else("WARN"if adx4 and adx4>10 else"NO")
-        results.append({"name":name,"s4":round(s4,1),"s1":round(s1,1),"adx4":round(adx4,1)if adx4 else 0,"price":pr,"trend":tr,"trend_ok":tok,"dir":"OVER"if ovs else"BOUNC","wick":round(wa,1),"spikes":ws,"score":sc})
+        adx4,_,_=calc_adx(c4);wa,ws=wick(c4)
+        pr=cl4[-1]
+        extreme_s=max(0,(10-s4)/10)*0.25+max(0,(10-s1)/10)*0.25 if ovs else max(0,(s4-90)/10)*0.25+max(0,(s1-90)/10)*0.25
+        adx_s=min(1,(adx4 or 0)/30)*0.2;wick_s=max(0,1-wa/3)*0.2;spike_s=max(0,1-ws*5/20)*0.1
+        sc=round(extreme_s+adx_s+wick_s+spike_s,3)
+        results.append({"name":name,"s4":round(s4,1),"s1":round(s1,1),"adx4":round(adx4,1)if adx4 else 0,"price":pr,"dir":"OVER"if ovs else"BOUNC","wick":round(wa,1),"spikes":ws,"score":sc})
         time.sleep(0.05)
     results.sort(key=lambda x:-x["score"])
-    clean=[r for r in results if r["wick"]<3 and r["spikes"]<=2 and r["adx4"]>15 and r["trend_ok"]=="OK"and r["score"]>0.4]
+    clean=[r for r in results if r["wick"]<3 and r["spikes"]<=2 and r["score"]>0.3]
     token=os.environ.get("PUSHPLUS_TOKEN","")
     if not token:
         tp=os.path.join(os.path.dirname(os.path.abspath(__file__)),".pushplus_token")
@@ -127,16 +120,17 @@ def main():
             with open(tp)as f:token=f.read().strip()
     if clean:
         print(f"\nCLEAN({len(clean)}):")
-        for r in clean:print(f"  {r['name']}{r['dir']}SRSI={r['s4']}/{r['s1']}ADX={r['adx4']:.0f}")
+        for r in clean:print(f"  {r['name']}{r['dir']}SRSI={r['s4']}/{r['s1']}")
     if token and clean:
         h='<div style="font-family:-apple-system,sans-serif;max-width:480px">'
-        h+='<h3 style="margin:0 0 6px">Extreme SRSI (成交量Top100)</h3>'
+        h+='<h3 style="margin:0 0 6px">Extreme SRSI (4H+1D)</h3>'
         for r in clean:
-            e="🟢"if r["dir"]=="OVER"else"🔴";c="#27ae60"if r["dir"]=="OVER"else"#e74c3c"
+            e="🟢"if r["dir"]=="OVER"else"🔴"
+            color="#27ae60"if r["dir"]=="OVER"else"#e74c3c"
             p=fmt_p(r["price"],f"{r['name']}-USDT-SWAP")
-            h+=f'<div style="margin:6px 0;padding:6px;background:#fff;border-left:3px solid {c}">'
-            h+=f'{e}<b>{r["name"]}</b><span style="color:{c}">{r["dir"]}</span>{p}<br>'
-            h+=f'<span style="font-size:11px;color:#333">SRSI={r["s4"]}/{r["s1"]}|ADX={r["adx4"]:.0f}|{r["trend"]}</span>'
+            h+=f'<div style="margin:6px 0;padding:6px;background:#fff;border-left:3px solid {color}">'
+            h+=f'{e}<b>{r["name"]}</b> <span style="color:{color}">{r["dir"]}</span> {p}<br>'
+            h+=f'<span style="font-size:11px;color:#333">SRSI={r["s4"]}/{r["s1"]}</span>'
             h+='</div>'
         h+='</div>'
         pl={"token":token,"title":"ExtremeSRSI","content":h,"template":"html"}
