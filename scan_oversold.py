@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Extreme SRSI Scanner v2.2 — OKX成交量Top100
-(4H<10+1D<10) OR (4H>90+1D>90) | NoSpikes only
+(4H<10+1D<10) OR (4H>90+1D>90) | NoSpikes | ADX>15
 """
 import requests, time, json, os
 from datetime import datetime, timezone, timedelta
@@ -112,7 +112,7 @@ def main():
         results.append({"name":name,"s4":round(s4,1),"s1":round(s1,1),"adx4":round(adx4,1)if adx4 else 0,"price":pr,"dir":"OVER"if ovs else"BOUNC","wick":round(wa,1),"spikes":ws,"score":sc})
         time.sleep(0.05)
     results.sort(key=lambda x:-x["score"])
-    clean=[r for r in results if r["wick"]<3 and r["spikes"]<=2 and r["score"]>0.3]
+    clean=[r for r in results if r["wick"]<3 and r["spikes"]<=2 and r["adx4"]>15 and r["score"]>0.3]
     token=os.environ.get("PUSHPLUS_TOKEN","")
     if not token:
         tp=os.path.join(os.path.dirname(os.path.abspath(__file__)),".pushplus_token")
