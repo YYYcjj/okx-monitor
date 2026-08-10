@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Extreme SRSI Scanner v2.1 — OKX成交量Top50
+Extreme SRSI Scanner v2.1 — OKX成交量Top100
 (4H<10+1D<10) OR (4H>90+1D>90) | NoSpikes | TrendAligned | ADX>15
 """
 import requests, time, json, os
@@ -99,7 +99,7 @@ def main():
     if d.get("code")!="0":print("Failed:",d);return
     items=[(t["instId"],float(t.get("volCcy24h",0)))for t in d["data"]if"USDT"in t["instId"]and not any(x in t["instId"]for x in["BRL","EUR","TRY","DAI","USDC","RUB"])]
     items.sort(key=lambda x:-x[1])
-    syms=[i[0]for i in items[:50]]
+    syms=[i[0]for i in items[:100]]
     print(f"Scan top {len(syms)} coins by volume...")
     results=[]
     for s in syms:
@@ -130,7 +130,7 @@ def main():
         for r in clean:print(f"  {r['name']}{r['dir']}SRSI={r['s4']}/{r['s1']}ADX={r['adx4']:.0f}")
     if token and clean:
         h='<div style="font-family:-apple-system,sans-serif;max-width:480px">'
-        h+='<h3 style="margin:0 0 6px">Extreme SRSI (成交量Top50)</h3>'
+        h+='<h3 style="margin:0 0 6px">Extreme SRSI (成交量Top100)</h3>'
         for r in clean:
             e="🟢"if r["dir"]=="OVER"else"🔴";c="#27ae60"if r["dir"]=="OVER"else"#e74c3c"
             p=fmt_p(r["price"],f"{r['name']}-USDT-SWAP")
