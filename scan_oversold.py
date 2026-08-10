@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Extreme SRSI Scanner v2.2 — OKX成交量Top100
-(4H<10+1D<10) OR (4H>90+1D>90) | NoSpikes | ADX>15
+Extreme SRSI Scanner v2.3 — OKX成交量Top100
+(4H<10+1D<10) OR (4H>90+1D>90) | NoSpikes | ADX>15 | ATR1H<2%
 """
 import requests, time, json, os
 from datetime import datetime, timezone, timedelta
@@ -71,6 +71,16 @@ def calc_adx(candles,period=14):
     for i in range(period,len(dxv)):av=(av*(period-1)+dxv[i])/period
     return av,sp/atrs*100 if atrs>0 else 0,sm/atrs*100 if atrs>0 else 0
 
+def calc_atr(candles,period=14):
+    n=len(candles)
+    if n<period+1:return None
+    h=[c["h"]for c in candles];l=[c["l"]for c in candles];cl=[c["c"]for c in candles]
+    tr=[0]*n
+    for i in range(1,n):tr[i]=max(h[i]-l[i],abs(h[i]-cl[i-1]),abs(l[i]-cl[i-1]))
+    atr=sum(tr[1:period+1])/period
+    for i in range(period+1,n):atr=(atr*(period-1)+tr[i])/period
+    return atr
+
 def wick(candles):
     ra=[];sp=0
     for c in candles[-20:]:
@@ -97,22 +107,24 @@ def main():
     results=[]
     for s in syms:
         name=s.replace("-USDT-SWAP","")
-        c4=get_candles(s,"4H",100);c1=get_candles(s,"1D",100)
+        c4=get_candles(s,"4H",100);c1=get_candles(s,"1D",100);c1h=get_candles(s,"1H",30)
         if not c4 or not c1:continue
         cl4=[c["c"]for c in c4];cl1=[c["c"]for c in c1]
         s4=calc_stoch_rsi(cl4);s1=calc_stoch_rsi(cl1)
         if s4 is None or s1 is None:continue
         ovs=s4<10 and s1<10;ovb=s4>90 and s1>90
         if not ovs and not ovb:continue
-        adx4,_,_=calc_adx(c4);wa,ws=wick(c4)
-        pr=cl4[-1]
+        adx4,_,_=calc_adx(c4);wa,ws=wick(c4);pr=cl4[-1]
+        if adx4 is None or adx4<=15:continue
+        atr1h=calc_atr(c1h)if c1h else None
+        if atr1h is None or atr1h/pr*100>=2:continue
         extreme_s=max(0,(10-s4)/10)*0.25+max(0,(10-s1)/10)*0.25 if ovs else max(0,(s4-90)/10)*0.25+max(0,(s1-90)/10)*0.25
         adx_s=min(1,(adx4 or 0)/30)*0.2;wick_s=max(0,1-wa/3)*0.2;spike_s=max(0,1-ws*5/20)*0.1
         sc=round(extreme_s+adx_s+wick_s+spike_s,3)
-        results.append({"name":name,"s4":round(s4,1),"s1":round(s1,1),"adx4":round(adx4,1)if adx4 else 0,"price":pr,"dir":"OVER"if ovs else"BOUNC","wick":round(wa,1),"spikes":ws,"score":sc})
+        results.append({"name":name,"s4":round(s4,1),"s1":round(s1,1),"adx4":round(adx4,1)if adx4 else 0,"price":pr,"dir":"OVER"if ovs else"BOUNC","wick":round(wa,1),"spikes":ws,"score":sc,"atr1h_pct":round(atr1h/pr*100,1)})
         time.sleep(0.05)
     results.sort(key=lambda x:-x["score"])
-    clean=[r for r in results if r["wick"]<3 and r["spikes"]<=2 and r["adx4"]>15 and r["score"]>0.3]
+    clean=[r for r in results if r["wick"]<3 and r["spikes"]<=2 and r["score"]>0.3]
     token=os.environ.get("PUSHPLUS_TOKEN","")
     if not token:
         tp=os.path.join(os.path.dirname(os.path.abspath(__file__)),".pushplus_token")
@@ -120,7 +132,7 @@ def main():
             with open(tp)as f:token=f.read().strip()
     if clean:
         print(f"\nCLEAN({len(clean)}):")
-        for r in clean:print(f"  {r['name']}{r['dir']}SRSI={r['s4']}/{r['s1']}")
+        for r in clean:print(f"  {r['name']}{r['dir']}SRSI={r['s4']}/{r['s1']}ATR1H={r.get('atr1h_pct','?')}%")
     if token and clean:
         h='<div style="font-family:-apple-system,sans-serif;max-width:480px">'
         h+='<h3 style="margin:0 0 6px">Extreme SRSI (4H+1D)</h3>'
@@ -130,7 +142,7 @@ def main():
             p=fmt_p(r["price"],f"{r['name']}-USDT-SWAP")
             h+=f'<div style="margin:6px 0;padding:6px;background:#fff;border-left:3px solid {color}">'
             h+=f'{e}<b>{r["name"]}</b> <span style="color:{color}">{r["dir"]}</span> {p}<br>'
-            h+=f'<span style="font-size:11px;color:#333">SRSI={r["s4"]}/{r["s1"]}</span>'
+            h+=f'<span style="font-size:11px;color:#333">SRSI={r["s4"]}/{r["s1"]}|ADX={r["adx4"]:.0f}|ATR1H={r.get("atr1h_pct","?")}%</span>'
             h+='</div>'
         h+='</div>'
         pl={"token":token,"title":"ExtremeSRSI","content":h,"template":"html"}
