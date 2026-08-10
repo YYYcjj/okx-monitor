@@ -1,0 +1,26 @@
+name: Daily Best Coins
+
+on:
+  schedule:
+    # CST 9:00 daily (UTC 1:00)
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests urllib3 --quiet
+
+      - name: Find best coins
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
+        run: python find_best_coins.py
