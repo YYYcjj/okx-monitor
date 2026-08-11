@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Extreme SRSI Scanner v2.3 — OKX成交量Top100
-(4H<10+1D<10) OR (4H>90+1D>90) | NoSpikes | ADX>15 | ATR1H<2%
+Extreme SRSI Scanner v3.0 — 纯必要条件，无评分软过滤
+所有条件都是硬门槛：SRSI极端 + ADX>15 + ATR1H<2% + 无插针
 """
 import requests, time, json, os
 from datetime import datetime, timezone, timedelta
@@ -81,14 +81,15 @@ def calc_atr(candles,period=14):
     for i in range(period+1,n):atr=(atr*(period-1)+tr[i])/period
     return atr
 
-def wick(candles):
-    ra=[];sp=0
+def wick_ok(candles):
+    """True = clean / no spikes"""
+    wa=[];sp=0
     for c in candles[-20:]:
         body=max(abs(c["c"]-c["o"]),1e-10)
         uw=c["h"]-max(c["c"],c["o"]);lw=min(c["c"],c["o"])-c["l"]
-        r=min((uw+lw)/body,10);ra.append(r)
+        r=min((uw+lw)/body,10);wa.append(r)
         if r>4:sp+=1
-    return sum(ra)/len(ra),sp
+    return sum(wa)/len(wa)<3 and sp<=2
 
 def fmt_p(p,inst):
     if "BTC" in inst or "ETH" in inst:return f"{p:.1f}"
@@ -103,54 +104,61 @@ def main():
     items=[(t["instId"],float(t.get("volCcy24h",0)))for t in d["data"]if"USDT"in t["instId"]and not any(x in t["instId"]for x in["BRL","EUR","TRY","DAI","USDC","RUB"])]
     items.sort(key=lambda x:-x[1])
     syms=[i[0]for i in items[:100]]
-    print(f"Scan top {len(syms)} coins by volume...")
-    results=[]
+    print(f"Scan top {len(syms)} coins...")
+    hits=[]
     for s in syms:
         name=s.replace("-USDT-SWAP","")
         c4=get_candles(s,"4H",100);c1=get_candles(s,"1D",100);c1h=get_candles(s,"1H",30)
         if not c4 or not c1:continue
+
+        # Requirement 1: Extreme SRSI
         cl4=[c["c"]for c in c4];cl1=[c["c"]for c in c1]
         s4=calc_stoch_rsi(cl4);s1=calc_stoch_rsi(cl1)
         if s4 is None or s1 is None:continue
         ovs=s4<10 and s1<10;ovb=s4>90 and s1>90
         if not ovs and not ovb:continue
-        adx4,_,_=calc_adx(c4);wa,ws=wick(c4);pr=cl4[-1]
+
+        # Requirement 2: ADX(4H) > 15
+        adx4,_,_=calc_adx(c4)
         if adx4 is None or adx4<=15:continue
+
+        # Requirement 3: ATR(1H) < 2%
+        pr=cl4[-1]
         atr1h=calc_atr(c1h)if c1h else None
-        if atr1h is None or atr1h/pr*100>=2:continue
-        extreme_s=max(0,(10-s4)/10)*0.25+max(0,(10-s1)/10)*0.25 if ovs else max(0,(s4-90)/10)*0.25+max(0,(s1-90)/10)*0.25
-        adx_s=min(1,(adx4 or 0)/30)*0.2;wick_s=max(0,1-wa/3)*0.2;spike_s=max(0,1-ws*5/20)*0.1
-        sc=round(extreme_s+adx_s+wick_s+spike_s,3)
-        results.append({"name":name,"s4":round(s4,1),"s1":round(s1,1),"adx4":round(adx4,1)if adx4 else 0,"price":pr,"dir":"OVER"if ovs else"BOUNC","wick":round(wa,1),"spikes":ws,"score":sc,"atr1h_pct":round(atr1h/pr*100,1)})
+        if atr1h is None or atr1h/pr>=0.02:continue
+
+        # Requirement 4: No spikes
+        if not wick_ok(c4):continue
+
+        hits.append({"name":name,"s4":round(s4,1),"s1":round(s1,1),"adx4":round(adx4,1),"price":pr,"dir":"OVER"if ovs else"BOUNC","atr1h":round(atr1h/pr*100,1)})
         time.sleep(0.05)
-    results.sort(key=lambda x:-x["score"])
-    clean=[r for r in results if r["wick"]<3 and r["spikes"]<=2 and r["score"]>0.3]
+
     token=os.environ.get("PUSHPLUS_TOKEN","")
     if not token:
         tp=os.path.join(os.path.dirname(os.path.abspath(__file__)),".pushplus_token")
-        if os.path.exists(tp):
-            with open(tp)as f:token=f.read().strip()
-    if clean:
-        print(f"\nCLEAN({len(clean)}):")
-        for r in clean:print(f"  {r['name']}{r['dir']}SRSI={r['s4']}/{r['s1']}ATR1H={r.get('atr1h_pct','?')}%")
-    if token and clean:
+        if os.path.exists(tp):with open(tp)as f:token=f.read().strip()
+
+    if hits:
+        print(f"\nHITS({len(hits)}):")
+        for r in hits:print(f"  {r['name']}{r['dir']}SRSI={r['s4']}/{r['s1']}ADX={r['adx4']:.0f}ATR={r['atr1h']}%")
+
+    if token and hits:
         h='<div style="font-family:-apple-system,sans-serif;max-width:480px">'
-        h+='<h3 style="margin:0 0 6px">Extreme SRSI (4H+1D)</h3>'
-        for r in clean:
+        h+='<h3 style="margin:0 0 6px">Extreme SRSI Signal</h3>'
+        for r in hits:
             e="🟢"if r["dir"]=="OVER"else"🔴"
             color="#27ae60"if r["dir"]=="OVER"else"#e74c3c"
             p=fmt_p(r["price"],f"{r['name']}-USDT-SWAP")
             h+=f'<div style="margin:6px 0;padding:6px;background:#fff;border-left:3px solid {color}">'
             h+=f'{e}<b>{r["name"]}</b> <span style="color:{color}">{r["dir"]}</span> {p}<br>'
-            h+=f'<span style="font-size:11px;color:#333">SRSI={r["s4"]}/{r["s1"]}|ADX={r["adx4"]:.0f}|ATR1H={r.get("atr1h_pct","?")}%</span>'
+            h+=f'<span style="font-size:11px;color:#333">SRSI={r["s4"]}/{r["s1"]}|ADX={r["adx4"]:.0f}|ATR={r["atr1h"]}%</span>'
             h+='</div>'
         h+='</div>'
         pl={"token":token,"title":"ExtremeSRSI","content":h,"template":"html"}
         try:
             rp=requests.post("http://www.pushplus.plus/send",json=pl,timeout=10)
-            rj=rp.json()
-            print(f"\nPush:{'OK'if rj.get('code')==200 else rj}")
-        except Exception as e:print(f"\nPush error:{e}")
-    return results,clean
+            print(f"\nPush:{'OK'if rp.json().get('code')==200 else rp.json()}")
+        except Exception as e:print(f"Push error:{e}")
+    return hits
 
 if __name__=="__main__":main()
