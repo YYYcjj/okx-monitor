@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Extreme SRSI Scanner v3.2 — 纯必要条件，无评分软过滤
+Extreme SRSI Scanner v3.3 — 纯必要条件，无评分软过滤
 所有条件都是硬门槛：SRSI极端(<20或>80) + ADX>15 + ATR1H<2% + 无插针
+扫描池：成交量Top200 + 新币榜Top50（按listTime）
 """
 import requests, time, json, os
 from datetime import datetime, timezone, timedelta
@@ -98,13 +99,35 @@ def fmt_p(p,inst):
     return f"{p:.6g}"
 
 def main():
+    EXCL=["BRL","EUR","TRY","DAI","USDC","RUB"]
     r=requests.get(f"{OKX}/api/v5/market/tickers",params={"instType":"SWAP"},timeout=15)
     d=r.json()
     if d.get("code")!="0":print("Failed:",d);return
-    items=[(t["instId"],float(t.get("volCcy24h",0)))for t in d["data"]if"USDT"in t["instId"]and not any(x in t["instId"]for x in["BRL","EUR","TRY","DAI","USDC","RUB"])]
+    items=[(t["instId"],float(t.get("volCcy24h",0)))for t in d["data"]if"USDT"in t["instId"]and not any(x in t["instId"]for x in EXCL)]
     items.sort(key=lambda x:-x[1])
-    syms=[i[0]for i in items[:100]]
-    print(f"Scan top {len(syms)} coins...")
+    vol_top=[i[0]for i in items[:200]]
+
+    new_coins=[]
+    try:
+        r2=requests.get(f"{OKX}/api/v5/public/instruments",params={"instType":"SWAP"},timeout=15)
+        d2=r2.json()
+        if d2.get("code")=="0":
+            insts=[]
+            for it in d2["data"]:
+                if"USDT"in it["instId"]and not any(x in it["instId"]for x in EXCL):
+                    lt=it.get("listTime") or 0
+                    insts.append((it["instId"],int(lt)))
+            insts.sort(key=lambda x:-x[1])
+            new_coins=[i[0]for i in insts[:50]]
+    except Exception as e:
+        print(f"new-coins fetch failed: {e}")
+
+    seen=set();syms=[]
+    for s in vol_top+new_coins:
+        if s not in seen:
+            seen.add(s);syms.append(s)
+
+    print(f"Scan pool: {len(vol_top)} vol-top + {len(new_coins)} new = {len(syms)} unique...")
     hits=[]
     for s in syms:
         name=s.replace("-USDT-SWAP","")
