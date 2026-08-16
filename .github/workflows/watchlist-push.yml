@@ -1,0 +1,29 @@
+name: Watchlist Push
+
+on:
+  schedule:
+    # CST 10,14,16,20 → UTC 2,6,8,12
+    - cron: '0 2,6,8,12 * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - 'push_watchlist.py'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests urllib3 --quiet
+
+      - name: Run watchlist push
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
+        run: python push_watchlist.py
