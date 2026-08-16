@@ -6,8 +6,8 @@ import requests, time, hmac, base64, hashlib, json, os
 from datetime import datetime, timezone, timedelta
 
 OKX = "https://www.okx.com"
-KEY = "d7f911a9-11aa-4c0c-8f3f-e389f86a77fc"
-SECRET = "6A8C3666FE205E97B27132BF9921EEAA"
+KEY = "c576e89e-84e6-4c58-b1f5-d1a01de7c341"
+SECRET = "9A40BFDF42BF32E4DB26EE81C9577DDA"
 PASS = "1qaz2wsxcJJ@"
 PASS_CANDIDATES = ["1qaz2wsxcJJ@", "1qaz2wsxcJJ!", "1qaz2wsxcJJ", "1qaz2wsxcJJ＠",
                    "1Qaz2wsxcJJ@", "1qaz2wsxcjj@", "1qaz2wsxcJj@", "1qaz2wsxcjJ@",
@@ -26,6 +26,7 @@ def req(method, path, params=None, simulated=False, dbg=None):
         dbg.append(f"KEY={KEY[:10]} SECRET={SECRET[:10]}")
         dbg.append(f"prehash={prehash[:100]}")
         dbg.append(f"sig={sig[:44]}")
+    # 尝试多个 passphrase
     last_resp = {}
     for p in PASS_CANDIDATES:
         h = {"OK-ACCESS-KEY":KEY,"OK-ACCESS-SIGN":sig,
@@ -41,7 +42,7 @@ def req(method, path, params=None, simulated=False, dbg=None):
                     if dbg is not None:
                         dbg.append(f"passphrase OK: {p!r}")
                     return last_resp
-                if code != "50105":
+                if code != "50105":  # 非 passphrase 错误，直接返回
                     return last_resp
                 break
             except: time.sleep(1)
@@ -50,6 +51,11 @@ def req(method, path, params=None, simulated=False, dbg=None):
     return last_resp
 
 def main():
+    # 诊断 passphrase 精确字节
+    print("PASS repr:", repr(PASS))
+    print("PASS codepoints:", [hex(ord(c)) for c in PASS])
+    print("PASS len:", len(PASS))
+
     end = int(datetime.now(timezone.utc).timestamp()*1000)
     begin = int((datetime.now(timezone.utc)-timedelta(days=30)).timestamp()*1000)
     params = {"instType":"SWAP","state":"filled","begin":str(begin),"end":str(end),"limit":"100"}
