@@ -1,28 +1,25 @@
 PASS repr: '1qaz2wsxcJJ@'
 PASS codepoints: ['0x31', '0x71', '0x61', '0x7a', '0x32', '0x77', '0x73', '0x78', '0x63', '0x4a', '0x4a', '0x40']
 PASS len: 12
-ts=2026-08-16T15:58:28.554Z
-KEY=d7f911a9-1 SECRET=6A8C3666FE
-prehash=2026-08-16T15:58:28.554ZGET/api/v5/trade/orders-history?instType=SWAP&state=filled&begin=17843039085
-sig=NBgjSPNDyK0BLRxZvCBfp2orSPFOOgpHqoJSw/8DRNY=
-all passphrase failed, last={'msg': 'Request header OK-ACCESS-PASSPHRASE incorrect.', 'code': '50105'}
-[orders-history 实盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
-ts=2026-08-16T15:58:32.310Z
-KEY=d7f911a9-1 SECRET=6A8C3666FE
-prehash=2026-08-16T15:58:32.310ZGET/api/v5/trade/orders-history?instType=SWAP&state=filled&begin=17843039085
-sig=m8CvS4JNiLHtqloIcjt9B07DfIg/HzV6Lnzv173Ye9Q=
-all passphrase failed, last={'msg': 'Request header OK-ACCESS-PASSPHRASE incorrect.', 'code': '50105'}
-[orders-history 模拟盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
-ts=2026-08-16T15:58:35.967Z
-KEY=d7f911a9-1 SECRET=6A8C3666FE
-prehash=2026-08-16T15:58:35.967ZGET/api/v5/account/positions?instType=SWAP
-sig=v2xCQUPChSLq0M+eENEDvpFrqw8ub0E6b4AufPUdO3k=
-all passphrase failed, last={'msg': 'Request header OK-ACCESS-PASSPHRASE incorrect.', 'code': '50105'}
-[positions 实盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
-ts=2026-08-16T15:58:39.618Z
-KEY=d7f911a9-1 SECRET=6A8C3666FE
-prehash=2026-08-16T15:58:39.618ZGET/api/v5/account/positions?instType=SWAP
-sig=PxML6fU+mbsaw8bR20nymUuw2PK4/RQPD627+dEgqKY=
-all passphrase failed, last={'msg': 'Request header OK-ACCESS-PASSPHRASE incorrect.', 'code': '50105'}
-[positions 模拟盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
+ts=2026-08-16T16:14:53.266Z
+KEY=c576e89e-8 SECRET=9A40BFDF42
+prehash=2026-08-16T16:14:53.266ZGET/api/v5/trade/orders-history?instType=SWAP&state=filled&begin=17843048932
+sig=IxZpEh2EvN4cD8/yCHdFUAZU6SoEabfr8GcCLW72t9c=
+passphrase OK: '1qaz2wsxcJJ@'
+[orders-history 实盘] code=0 msg=
+ts=2026-08-16T16:14:53.721Z
+KEY=c576e89e-8 SECRET=9A40BFDF42
+prehash=2026-08-16T16:14:53.721ZGET/api/v5/account/positions?instType=SWAP
+sig=SlHJdk4Z/dE9mZ06UAyArMC2w9Sx9HSnIaHQ3lsOEz0=
+passphrase OK: '1qaz2wsxcJJ@'
+[positions 实盘] code=0 msg=
 ---
+PUMP-USDT-SWAP
+WLD-USDT-SWAP
+ORDI-USDT-SWAP
+HUMA-USDT-SWAP
+BIO-USDT-SWAP
+ETH-USDT-SWAP
+NEAR-USDT-SWAP
+APT-USDT-SWAP
+PEOPLE-USDT-SWAP
