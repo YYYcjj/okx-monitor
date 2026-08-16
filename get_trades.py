@@ -6,9 +6,9 @@ import requests, time, hmac, base64, hashlib, json, os
 from datetime import datetime, timezone, timedelta
 
 OKX = "https://www.okx.com"
-KEY = os.environ.get("OKX_API_KEY") or "6d758f5a-4ea7-44d1-bc56-5b8659263b1a"
-SECRET = os.environ.get("OKX_SECRET_KEY") or "760BEBD659B861D17B5DE6DF7112E5CF"
-PASS = os.environ.get("OKX_PASSPHRASE") or "1qaz2wsxcJJ!"
+KEY = os.environ.get("OKX_API_KEY") or "d7f911a9-11aa-4c0c-8f3f-e389f86a77fc"
+SECRET = os.environ.get("OKX_SECRET_KEY") or "6A8C3666FE205E97B27132BF9921EEAA"
+PASS = os.environ.get("OKX_PASSPHRASE") or "1qaz2wsxcJJ@"
 
 def sign(ts, method, path, body=""):
     return base64.b64encode(hmac.new(SECRET.encode(), (ts+method+path+body).encode(), hashlib.sha256).digest()).decode()
