@@ -16,7 +16,13 @@ def sign(ts, method, path, body=""):
 def req(method, path, params=None, simulated=False):
     ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00","Z")
     qs = "?" + "&".join(f"{k}={v}" for k,v in (params or {}).items()) if params else ""
-    h = {"OK-ACCESS-KEY":KEY,"OK-ACCESS-SIGN":sign(ts,method,path+qs),
+    prehash = ts + method + path + qs
+    sig = sign(ts, method, path + qs)
+    print(f"DEBUG ts={ts}")
+    print(f"DEBUG KEY={KEY[:8]}... SECRET={SECRET[:8]}... PASS={PASS[:4]}...")
+    print(f"DEBUG prehash={prehash[:120]}")
+    print(f"DEBUG sig={sig[:40]}...")
+    h = {"OK-ACCESS-KEY":KEY,"OK-ACCESS-SIGN":sig,
          "OK-ACCESS-TIMESTAMP":ts,"OK-ACCESS-PASSPHRASE":PASS,"Content-Type":"application/json"}
     if simulated:
         h["x-simulated-trading"] = "1"
