@@ -1,21 +1,25 @@
-ts=2026-08-16T15:41:49.363Z
-KEY=d7f911a9-1 SECRET=6A8C3666FE PASS=1qaz2
-prehash=2026-08-16T15:41:49.363ZGET/api/v5/trade/orders-history?instType=SWAP&state=filled&begin=17843029093
-sig=bOZfIy9QQPhS+Xfz4rpOk9QoMZLwxQl8SeVJOzW4jzE=
+ts=2026-08-16T15:44:04.171Z
+KEY=d7f911a9-1 SECRET=6A8C3666FE
+prehash=2026-08-16T15:44:04.171ZGET/api/v5/trade/orders-history?instType=SWAP&state=filled&begin=17843030441
+sig=yZjPIXEcUQNIqpTvPVeXKjBwCPgiKdvp1uAq7t1+AGw=
+all passphrase failed, last={'msg': 'Request header OK-ACCESS-PASSPHRASE incorrect.', 'code': '50105'}
 [orders-history 实盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
-ts=2026-08-16T15:41:49.893Z
-KEY=d7f911a9-1 SECRET=6A8C3666FE PASS=1qaz2
-prehash=2026-08-16T15:41:49.893ZGET/api/v5/trade/orders-history?instType=SWAP&state=filled&begin=17843029093
-sig=CTGhYmiHNmiRA+r1hKZOWyjCdXfNl1hb9qf0tT0zYd0=
+ts=2026-08-16T15:44:06.932Z
+KEY=d7f911a9-1 SECRET=6A8C3666FE
+prehash=2026-08-16T15:44:06.932ZGET/api/v5/trade/orders-history?instType=SWAP&state=filled&begin=17843030441
+sig=FVaT0eYleTaDVhx4Bdhez7AXxmuy9evo2rc8HhoLIxk=
+all passphrase failed, last={'msg': 'Request header OK-ACCESS-PASSPHRASE incorrect.', 'code': '50105'}
 [orders-history 模拟盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
-ts=2026-08-16T15:41:50.264Z
-KEY=d7f911a9-1 SECRET=6A8C3666FE PASS=1qaz2
-prehash=2026-08-16T15:41:50.264ZGET/api/v5/account/positions?instType=SWAP
-sig=/F831v1/w3aNjEDujmNI4QpGJ7NMHL423QyS0XqnmQA=
+ts=2026-08-16T15:44:09.588Z
+KEY=d7f911a9-1 SECRET=6A8C3666FE
+prehash=2026-08-16T15:44:09.588ZGET/api/v5/account/positions?instType=SWAP
+sig=xA4bfwCAZrFpxeKuOslB5BC75W1P0aCzwR4P2nT7mck=
+all passphrase failed, last={'msg': 'Request header OK-ACCESS-PASSPHRASE incorrect.', 'code': '50105'}
 [positions 实盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
-ts=2026-08-16T15:41:50.576Z
-KEY=d7f911a9-1 SECRET=6A8C3666FE PASS=1qaz2
-prehash=2026-08-16T15:41:50.576ZGET/api/v5/account/positions?instType=SWAP
-sig=MX7jMKbQstiUFfZMMhO12Rt9L2gfiS2P13uTLC6GAFA=
+ts=2026-08-16T15:44:12.349Z
+KEY=d7f911a9-1 SECRET=6A8C3666FE
+prehash=2026-08-16T15:44:12.349ZGET/api/v5/account/positions?instType=SWAP
+sig=mp1Hc9E1adua2mBpVvog9IHRJ8ApYryQN9T5hJY7ijo=
+all passphrase failed, last={'msg': 'Request header OK-ACCESS-PASSPHRASE incorrect.', 'code': '50105'}
 [positions 模拟盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
 ---
