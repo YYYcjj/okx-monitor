@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Extreme SRSI Scanner v3.0 — 纯必要条件，无评分软过滤
+Extreme SRSI Scanner v3.1 — 纯必要条件，无评分软过滤
 所有条件都是硬门槛：SRSI极端 + ADX>15 + ATR1H<2% + 无插针
 """
 import requests, time, json, os
