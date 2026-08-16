@@ -6,22 +6,23 @@ import requests, time, hmac, base64, hashlib, json, os
 from datetime import datetime, timezone, timedelta
 
 OKX = "https://www.okx.com"
-KEY = os.environ.get("OKX_API_KEY") or "d7f911a9-11aa-4c0c-8f3f-e389f86a77fc"
-SECRET = os.environ.get("OKX_SECRET_KEY") or "6A8C3666FE205E97B27132BF9921EEAA"
-PASS = os.environ.get("OKX_PASSPHRASE") or "1qaz2wsxcJJ@"
+KEY = "d7f911a9-11aa-4c0c-8f3f-e389f86a77fc"
+SECRET = "6A8C3666FE205E97B27132BF9921EEAA"
+PASS = "1qaz2wsxcJJ@"
 
 def sign(ts, method, path, body=""):
     return base64.b64encode(hmac.new(SECRET.encode(), (ts+method+path+body).encode(), hashlib.sha256).digest()).decode()
 
-def req(method, path, params=None, simulated=False):
+def req(method, path, params=None, simulated=False, dbg=None):
     ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00","Z")
     qs = "?" + "&".join(f"{k}={v}" for k,v in (params or {}).items()) if params else ""
     prehash = ts + method + path + qs
     sig = sign(ts, method, path + qs)
-    print(f"DEBUG ts={ts}")
-    print(f"DEBUG KEY={KEY[:8]}... SECRET={SECRET[:8]}... PASS={PASS[:4]}...")
-    print(f"DEBUG prehash={prehash[:120]}")
-    print(f"DEBUG sig={sig[:40]}...")
+    if dbg is not None:
+        dbg.append(f"ts={ts}")
+        dbg.append(f"KEY={KEY[:10]} SECRET={SECRET[:10]} PASS={PASS[:5]}")
+        dbg.append(f"prehash={prehash[:100]}")
+        dbg.append(f"sig={sig[:44]}")
     h = {"OK-ACCESS-KEY":KEY,"OK-ACCESS-SIGN":sig,
          "OK-ACCESS-TIMESTAMP":ts,"OK-ACCESS-PASSPHRASE":PASS,"Content-Type":"application/json"}
     if simulated:
@@ -41,7 +42,7 @@ def main():
     trades = {}
     debug_lines = []
 
-    r = req("GET", "/api/v5/trade/orders-history", params)
+    r = req("GET", "/api/v5/trade/orders-history", params, dbg=debug_lines)
     debug_lines.append(f"[orders-history 实盘] code={r.get('code')} msg={r.get('msg')}")
     if r.get("code")=="0":
         for o in r.get("data",[]):
@@ -50,7 +51,7 @@ def main():
                 nm = inst.replace("-USDT-SWAP","").replace("-USDT","")
                 trades[nm] = trades.get(nm,0)+1
     else:
-        r = req("GET", "/api/v5/trade/orders-history", params, simulated=True)
+        r = req("GET", "/api/v5/trade/orders-history", params, simulated=True, dbg=debug_lines)
         debug_lines.append(f"[orders-history 模拟盘] code={r.get('code')} msg={r.get('msg')}")
         if r.get("code")=="0":
             for o in r.get("data",[]):
@@ -60,10 +61,10 @@ def main():
                     trades[nm] = trades.get(nm,0)+1
 
     positions = []
-    r2 = req("GET", "/api/v5/account/positions", {"instType":"SWAP"})
+    r2 = req("GET", "/api/v5/account/positions", {"instType":"SWAP"}, dbg=debug_lines)
     debug_lines.append(f"[positions 实盘] code={r2.get('code')} msg={r2.get('msg')}")
     if r2.get("code")!="0":
-        r2 = req("GET", "/api/v5/account/positions", {"instType":"SWAP"}, simulated=True)
+        r2 = req("GET", "/api/v5/account/positions", {"instType":"SWAP"}, simulated=True, dbg=debug_lines)
         debug_lines.append(f"[positions 模拟盘] code={r2.get('code')} msg={r2.get('msg')}")
     if r2.get("code")=="0":
         for p in r2.get("data",[]):

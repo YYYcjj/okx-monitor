@@ -23,10 +23,6 @@ jobs:
         run: pip install requests urllib3 --quiet
 
       - name: Run get_trades
-        env:
-          OKX_API_KEY: ${{ secrets.OKX_API_KEY || '' }}
-          OKX_SECRET_KEY: ${{ secrets.OKX_SECRET_KEY || '' }}
-          OKX_PASSPHRASE: ${{ secrets.OKX_PASSPHRASE || '' }}
         run: python get_trades.py
 
       - name: Commit result
