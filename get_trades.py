@@ -9,7 +9,9 @@ OKX = "https://www.okx.com"
 KEY = "d7f911a9-11aa-4c0c-8f3f-e389f86a77fc"
 SECRET = "6A8C3666FE205E97B27132BF9921EEAA"
 PASS = "1qaz2wsxcJJ@"
-PASS_CANDIDATES = ["1qaz2wsxcJJ@", "1qaz2wsxcJJ!", "1qaz2wsxcJJ", "1qaz2wsxcJJ＠"]
+PASS_CANDIDATES = ["1qaz2wsxcJJ@", "1qaz2wsxcJJ!", "1qaz2wsxcJJ", "1qaz2wsxcJJ＠",
+                   "1Qaz2wsxcJJ@", "1qaz2wsxcjj@", "1qaz2wsxcJj@", "1qaz2wsxcjJ@",
+                   "1qaz2wsxcJJ @", "1qaz2wsxcJJ@ "]
 
 def sign(ts, method, path, body=""):
     return base64.b64encode(hmac.new(SECRET.encode(), (ts+method+path+body).encode(), hashlib.sha256).digest()).decode()
@@ -54,6 +56,9 @@ def main():
 
     trades = {}
     debug_lines = []
+    debug_lines.append(f"PASS repr: {repr(PASS)}")
+    debug_lines.append(f"PASS codepoints: {[hex(ord(c)) for c in PASS]}")
+    debug_lines.append(f"PASS len: {len(PASS)}")
 
     r = req("GET", "/api/v5/trade/orders-history", params, dbg=debug_lines)
     debug_lines.append(f"[orders-history 实盘] code={r.get('code')} msg={r.get('msg')}")
