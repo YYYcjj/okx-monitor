@@ -136,7 +136,8 @@ def main():
     token=os.environ.get("PUSHPLUS_TOKEN","")
     if not token:
         tp=os.path.join(os.path.dirname(os.path.abspath(__file__)),".pushplus_token")
-        if os.path.exists(tp):with open(tp)as f:token=f.read().strip()
+        if os.path.exists(tp):
+            token=open(tp).read().strip()
 
     if hits:
         print(f"\nHITS({len(hits)}):")
