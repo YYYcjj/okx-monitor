@@ -1,5 +1,21 @@
-[orders-history 实盘] code=50113 msg=Invalid Sign
-[orders-history 模拟盘] code=50113 msg=Invalid Sign
-[positions 实盘] code=50113 msg=Invalid Sign
-[positions 模拟盘] code=50113 msg=Invalid Sign
+ts=2026-08-16T15:41:49.363Z
+KEY=d7f911a9-1 SECRET=6A8C3666FE PASS=1qaz2
+prehash=2026-08-16T15:41:49.363ZGET/api/v5/trade/orders-history?instType=SWAP&state=filled&begin=17843029093
+sig=bOZfIy9QQPhS+Xfz4rpOk9QoMZLwxQl8SeVJOzW4jzE=
+[orders-history 实盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
+ts=2026-08-16T15:41:49.893Z
+KEY=d7f911a9-1 SECRET=6A8C3666FE PASS=1qaz2
+prehash=2026-08-16T15:41:49.893ZGET/api/v5/trade/orders-history?instType=SWAP&state=filled&begin=17843029093
+sig=CTGhYmiHNmiRA+r1hKZOWyjCdXfNl1hb9qf0tT0zYd0=
+[orders-history 模拟盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
+ts=2026-08-16T15:41:50.264Z
+KEY=d7f911a9-1 SECRET=6A8C3666FE PASS=1qaz2
+prehash=2026-08-16T15:41:50.264ZGET/api/v5/account/positions?instType=SWAP
+sig=/F831v1/w3aNjEDujmNI4QpGJ7NMHL423QyS0XqnmQA=
+[positions 实盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
+ts=2026-08-16T15:41:50.576Z
+KEY=d7f911a9-1 SECRET=6A8C3666FE PASS=1qaz2
+prehash=2026-08-16T15:41:50.576ZGET/api/v5/account/positions?instType=SWAP
+sig=MX7jMKbQstiUFfZMMhO12Rt9L2gfiS2P13uTLC6GAFA=
+[positions 模拟盘] code=50105 msg=Request header OK-ACCESS-PASSPHRASE incorrect.
 ---
