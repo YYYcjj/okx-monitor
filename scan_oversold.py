@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Extreme SRSI Scanner v3.1 — 纯必要条件，无评分软过滤
-所有条件都是硬门槛：SRSI极端 + ADX>15 + ATR1H<2% + 无插针
+Extreme SRSI Scanner v3.2 — 纯必要条件，无评分软过滤
+所有条件都是硬门槛：SRSI极端(<20或>80) + ADX>15 + ATR1H<2% + 无插针
 """
 import requests, time, json, os
 from datetime import datetime, timezone, timedelta
@@ -115,7 +115,7 @@ def main():
         cl4=[c["c"]for c in c4];cl1=[c["c"]for c in c1]
         s4=calc_stoch_rsi(cl4);s1=calc_stoch_rsi(cl1)
         if s4 is None or s1 is None:continue
-        ovs=s4<10 and s1<10;ovb=s4>90 and s1>90
+        ovs=s4<20 and s1<20;ovb=s4>80 and s1>80
         if not ovs and not ovb:continue
 
         # Requirement 2: ADX(4H) > 15
