@@ -1,0 +1,41 @@
+name: Get Recent Trades
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'get_trades.py'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests urllib3 --quiet
+
+      - name: Run get_trades
+        env:
+          OKX_API_KEY: ${{ secrets.OKX_API_KEY || '' }}
+          OKX_SECRET_KEY: ${{ secrets.OKX_SECRET_KEY || '' }}
+          OKX_PASSPHRASE: ${{ secrets.OKX_PASSPHRASE || '' }}
+        run: python get_trades.py
+
+      - name: Commit result
+        run: |
+          git config user.name "OKX Bot"
+          git config user.email "bot@okx.local"
+          git add recent_trades.txt 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "no change"
+          else
+            git commit -m "[auto] 更新最近交易币种" && git push
+          fi
