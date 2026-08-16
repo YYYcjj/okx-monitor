@@ -9,6 +9,7 @@ OKX = "https://www.okx.com"
 KEY = "d7f911a9-11aa-4c0c-8f3f-e389f86a77fc"
 SECRET = "6A8C3666FE205E97B27132BF9921EEAA"
 PASS = "1qaz2wsxcJJ@"
+PASS_CANDIDATES = ["1qaz2wsxcJJ@", "1qaz2wsxcJJ!", "1qaz2wsxcJJ", "1qaz2wsxcJJ＠"]
 
 def sign(ts, method, path, body=""):
     return base64.b64encode(hmac.new(SECRET.encode(), (ts+method+path+body).encode(), hashlib.sha256).digest()).decode()
@@ -20,19 +21,31 @@ def req(method, path, params=None, simulated=False, dbg=None):
     sig = sign(ts, method, path + qs)
     if dbg is not None:
         dbg.append(f"ts={ts}")
-        dbg.append(f"KEY={KEY[:10]} SECRET={SECRET[:10]} PASS={PASS[:5]}")
+        dbg.append(f"KEY={KEY[:10]} SECRET={SECRET[:10]}")
         dbg.append(f"prehash={prehash[:100]}")
         dbg.append(f"sig={sig[:44]}")
-    h = {"OK-ACCESS-KEY":KEY,"OK-ACCESS-SIGN":sig,
-         "OK-ACCESS-TIMESTAMP":ts,"OK-ACCESS-PASSPHRASE":PASS,"Content-Type":"application/json"}
-    if simulated:
-        h["x-simulated-trading"] = "1"
-    for _ in range(3):
-        try:
-            r = requests.get(f"{OKX}{path}{qs}", headers=h, timeout=15)
-            return r.json()
-        except: time.sleep(1)
-    return {}
+    last_resp = {}
+    for p in PASS_CANDIDATES:
+        h = {"OK-ACCESS-KEY":KEY,"OK-ACCESS-SIGN":sig,
+             "OK-ACCESS-TIMESTAMP":ts,"OK-ACCESS-PASSPHRASE":p,"Content-Type":"application/json"}
+        if simulated:
+            h["x-simulated-trading"] = "1"
+        for _ in range(2):
+            try:
+                r = requests.get(f"{OKX}{path}{qs}", headers=h, timeout=15)
+                last_resp = r.json()
+                code = last_resp.get("code")
+                if code == "0":
+                    if dbg is not None:
+                        dbg.append(f"passphrase OK: {p!r}")
+                    return last_resp
+                if code != "50105":
+                    return last_resp
+                break
+            except: time.sleep(1)
+    if dbg is not None:
+        dbg.append(f"all passphrase failed, last={last_resp}")
+    return last_resp
 
 def main():
     end = int(datetime.now(timezone.utc).timestamp()*1000)
