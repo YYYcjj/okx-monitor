@@ -2,8 +2,8 @@ name: Trend Candidate Watch
 
 on:
   schedule:
-    # 每 15 分钟扫描一次，有信号即推送（全时段）
-    - cron: '*/15 * * * *'
+    # 每 1 小时扫描一次，有信号即推送（全时段）
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
