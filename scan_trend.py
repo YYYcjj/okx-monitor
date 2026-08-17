@@ -10,7 +10,7 @@ SRSI 三周期共振信号 (TrendWatch)
               —— 多头要求 1h、4h 均上行，空头要求 1h、4h 均下行；横盘/反向不推。
   质量过滤（沿用 ExtremeSRSI）：ATR(1h) < 2% 且 4h 无插针。
   ADX(1D) 作为趋势强度参考显示。
-扫描池复用 Top200(成交量) + 新币50，推送标题 TrendWatch。
+扫描池复用 Top100(成交量) + 新币50，推送标题 TrendWatch。
 """
 import requests, time, os
 
@@ -175,7 +175,7 @@ def main():
     items = [(t["instId"], float(t.get("volCcy24h", 0))) for t in d["data"]
              if "USDT" in t["instId"] and not any(x in t["instId"] for x in EXCL)]
     items.sort(key=lambda x: -x[1])
-    vol_top = [i[0] for i in items[:200]]
+    vol_top = [i[0] for i in items[:100]]
 
     new_coins = []
     try:
