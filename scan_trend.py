@@ -6,6 +6,7 @@ SRSI 三周期共振信号 (TrendWatch)
   空头：1d SRSI > 80  且 4h SRSI ∈ [60,90]  且 1h SRSI > 80
   三个周期必须同一方向，全部符合才推送。
   额外门槛：1h ADX > 20（1h 级别需存在趋势，过滤横盘噪音）。
+  质量过滤（沿用 ExtremeSRSI）：ATR(1h) < 2% 且 4h 无插针。
   ADX(1D) 作为趋势强度参考显示。
 扫描池复用 Top200(成交量) + 新币50，推送标题 TrendWatch。
 """
@@ -96,6 +97,30 @@ def calc_adx(candles, period=14):
         av = (av * (period - 1) + dxv[i]) / period
     return av, sp / atrs * 100 if atrs > 0 else 0, sm / atrs * 100 if atrs > 0 else 0
 
+def calc_atr(candles, period=14):
+    """真实波动幅度均值（沿用 ExtremeSRSI 口径）"""
+    n = len(candles)
+    if n < period + 1:
+        return None
+    h = [c["h"] for c in candles]; l = [c["l"] for c in candles]; cl = [c["c"] for c in candles]
+    tr = [0] * n
+    for i in range(1, n):
+        tr[i] = max(h[i] - l[i], abs(h[i] - cl[i - 1]), abs(l[i] - cl[i - 1]))
+    atr = sum(tr[1:period + 1]) / period
+    for i in range(period + 1, n):
+        atr = (atr * (period - 1) + tr[i]) / period
+    return atr
+
+def wick_ok(candles):
+    """True = 干净 / 无插针（沿用 ExtremeSRSI 口径，检查近 20 根）"""
+    wa = []; sp = 0
+    for c in candles[-20:]:
+        body = max(abs(c["c"] - c["o"]), 1e-10)
+        uw = c["h"] - max(c["c"], c["o"]); lw = min(c["c"], c["o"]) - c["l"]
+        r = min((uw + lw) / body, 10); wa.append(r)
+        if r > 4: sp += 1
+    return sum(wa) / len(wa) < 3 and sp <= 2
+
 def fmt_p(p, inst):
     if "BTC" in inst or "ETH" in inst:
         return f"{p:.1f}"
@@ -175,12 +200,20 @@ def main():
         dirn = check_resonance(s1, s4, s1h, adx1h)
         if dirn is None:
             continue
+        # 质量过滤（沿用 ExtremeSRSI）：ATR(1h) < 2% 且 4h 无插针
+        price = closes4[-1]
+        atr1h = calc_atr(c1h)
+        if atr1h is None or atr1h / price >= 0.02:
+            continue
+        if not wick_ok(c4h):
+            continue
         adx1, _, _ = calc_adx(c1d)
         cands.append({
             "name": name, "dir": dirn,
             "s1": round(s1, 1), "s4": round(s4, 1), "s1h": round(s1h, 1),
             "adx": round(adx1, 1) if adx1 else 0,
             "adx1h": round(adx1h, 1),
+            "atr1h": round(atr1h / price * 100, 2),
             "price": closes1[-1],
         })
         time.sleep(0.05)
@@ -197,18 +230,18 @@ def main():
     if cands:
         print(f"\nSIGNALS({len(cands)}):")
         for r in cands:
-            print(f"  {r['name']}{r['dir']} SRSI(1d/4h/1h)={r['s1']}/{r['s4']}/{r['s1h']} ADX(1d/1h)={r['adx']:.0f}/{r['adx1h']:.0f}")
+            print(f"  {r['name']}{r['dir']} SRSI(1d/4h/1h)={r['s1']}/{r['s4']}/{r['s1h']} ADX(1d/1h)={r['adx']:.0f}/{r['adx1h']:.0f} ATR={r['atr1h']}%")
 
     if token and cands:
-        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
+        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'
         h += '<h3 style="margin:0 0 6px">SRSI 三周期共振 (TrendWatch)</h3>'
-        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80 ｜ 且 1h ADX&gt;20　共 {len(cands)} 个</div>'
+        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80 ｜ 且 1h ADX&gt;20 ｜ ATR(1h)&lt;2% &amp; 4h无插针　共 {len(cands)} 个</div>'
         for r in cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
             p = fmt_p(r["price"], f"{r['name']}-USDT-SWAP")
             h += f'<div style="margin:5px 0;padding:6px;background:#fff;border-left:3px solid {color}">'
             h += f'<b>{r["name"]}</b> <span style="color:{color}">{r["dir"]}</span> {p}<br>'
-            h += f'<span style="font-size:11px;color:#333">SRSI(1d/4h/1h)={r["s1"]}/{r["s4"]}/{r["s1h"]} | ADX(1d/1h)={r["adx"]:.0f}/{r["adx1h"]:.0f}</span>'
+            h += f'<span style="font-size:11px;color:#333">SRSI(1d/4h/1h)={r["s1"]}/{r["s4"]}/{r["s1h"]} | ADX(1d/1h)={r["adx"]:.0f}/{r["adx1h"]:.0f} | ATR={r["atr1h"]}%</span>'
             h += '</div>'
         h += '</div>'
         pl = {"token": token, "title": "TrendWatch", "content": h, "template": "html"}
