@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Trend Candidate Scanner (SRSI + ADX 简化版)
-只用一个思路判断"哪里可能有大趋势"：
-  - ADX(1D) > 25  → 日线级别存在趋势
-  - SRSI(1D) 位置 → 判断趋势方向(>50多 / <50空)与所处阶段
-  - SRSI(4H) 拐头 → 给出更及时的进场/出场时点
+SRSI 三周期共振信号 (TrendWatch)
+规则（用户定义）：
+  多头：1d SRSI < 20  且 4h SRSI ∈ [10,40]  且 1h SRSI < 20
+  空头：1d SRSI > 80  且 4h SRSI ∈ [60,90]  且 1h SRSI > 80
+  三个周期必须同一方向，全部符合才推送。
+  ADX(1D) 仅作为趋势强度参考显示，不做过滤。
 扫描池复用 Top200(成交量) + 新币50，推送标题 TrendWatch。
 """
 import requests, time, os
@@ -45,7 +46,7 @@ def calc_rsi(closes, period=14):
     return rv
 
 def calc_stoch_rsi_series(closes, rsi_period=14, stoch_period=14, sk=3):
-    """返回 SRSI 序列(已做 %K 平滑)，便于取末值与判断拐头"""
+    """返回 SRSI 序列(%K 平滑)，便于取末值"""
     rsi = calc_rsi(closes, rsi_period)
     if not rsi or len(rsi) < stoch_period + sk:
         return None
@@ -59,12 +60,8 @@ def calc_stoch_rsi_series(closes, rsi_period=14, stoch_period=14, sk=3):
     return kv
 
 def srsi_last(kv):
-    """返回 (末值, 是否拐头向上)"""
-    if not kv or len(kv) < 2:
-        return (kv[-1] if kv else None), None
-    last = (kv[-1] + (sum(kv[-3:]) / 3 if len(kv) >= 3 else kv[-1])) / 2
-    prev = (kv[-2] + (sum(kv[-4:-1]) / 3 if len(kv) >= 4 else kv[-2])) / 2
-    return last, last > prev
+    """返回末值"""
+    return kv[-1] if kv else None
 
 def calc_adx(candles, period=14):
     n = len(candles)
@@ -107,22 +104,15 @@ def fmt_p(p, inst):
         return f"{p:.4f}"
     return f"{p:.6g}"
 
-def classify(s1, up1, s4, up4):
-    """只用 SRSI(1D/4H) 判断阶段，ADX>25 已由调用方保证"""
-    if up1:
-        if s1 >= 80:
-            return "超买(多)"
-        if s1 >= 50:
-            return "趋势运行(多)"
-        # 1D SRSI 落到 20~50：上升趋势里的回撤
-        return "第一波回调买点(多)" if up4 else "回调中(多)"
-    else:
-        if s1 <= 20:
-            return "超卖(空)"
-        if s1 <= 50:
-            return "趋势运行(空)"
-        # 1D SRSI 升到 50~80：下降趋势里的反弹
-        return "反弹观察(空)" if not up4 else "反弹中(空)"
+def check_resonance(s1, s4, s1h):
+    """三周期 SRSI 共振：同一方向全部符合才返回方向，否则 None"""
+    # 多头：1d<20 且 4h∈[10,40] 且 1h<20
+    if s1 < 20 and (10 <= s4 <= 40) and s1h < 20:
+        return "多"
+    # 空头：1d>80 且 4h∈[60,90] 且 1h>80
+    if s1 > 80 and (60 <= s4 <= 90) and s1h > 80:
+        return "空"
+    return None
 
 def main():
     EXCL = ["BRL", "EUR", "TRY", "DAI", "USDC", "RUB"]
@@ -130,7 +120,7 @@ def main():
     d = r.json()
     if d.get("code") != "0":
         print("Failed:", d); return
-    items = [(t["instIdOrInst"], float(t.get("volCcy24h", 0))) for t in d["data"]
+    items = [(t["instId"], float(t.get("volCcy24h", 0))) for t in d["data"]
              if "USDT" in t["instId"] and not any(x in t["instId"] for x in EXCL)]
     items.sort(key=lambda x: -x[1])
     vol_top = [i[0] for i in items[:200]]
@@ -161,27 +151,30 @@ def main():
         name = s.replace("-USDT-SWAP", "")
         c1d = get_candles(s, "1D", 200)
         c4h = get_candles(s, "4H", 100)
-        if not c1d or not c4h:
+        c1h = get_candles(s, "1H", 100)
+        if not c1d or not c4h or not c1h:
             continue
         closes1 = [c["c"] for c in c1d]
         closes4 = [c["c"] for c in c4h]
-        adx1, _, _ = calc_adx(c1d)
-        if adx1 is None or adx1 <= 25:      # 无日线级趋势 → 跳过
-            continue
+        closes1h = [c["c"] for c in c1h]
         kv1 = calc_stoch_rsi_series(closes1)
         kv4 = calc_stoch_rsi_series(closes4)
-        if kv1 is None or kv4 is None:
+        kv1h = calc_stoch_rsi_series(closes1h)
+        if kv1 is None or kv4 is None or kv1h is None:
             continue
-        s1, up1 = srsi_last(kv1)
-        s4, up4 = srsi_last(kv4)
-        if s1 is None or s4 is None:
+        s1 = srsi_last(kv1)
+        s4 = srsi_last(kv4)
+        s1h = srsi_last(kv1h)
+        if s1 is None or s4 is None or s1h is None:
             continue
-        phase = classify(s1, up1, s4, up4)
+        dirn = check_resonance(s1, s4, s1h)
+        if dirn is None:
+            continue
+        adx1, _, _ = calc_adx(c1d)
         cands.append({
-            "name": name, "phase": phase,
-            "dir": "多" if s1 >= 50 else "空",
-            "adx": round(adx1, 1),
-            "s1": round(s1, 1), "s4": round(s4, 1),
+            "name": name, "dir": dirn,
+            "s1": round(s1, 1), "s4": round(s4, 1), "s1h": round(s1h, 1),
+            "adx": round(adx1, 1) if adx1 else 0,
             "price": closes1[-1],
         })
         time.sleep(0.05)
@@ -192,38 +185,24 @@ def main():
         if os.path.exists(tp):
             token = open(tp).read().strip()
 
-    priority = {
-        "第一波回调买点(多)": 0, "反弹观察(空)": 0,
-        "趋势运行(多)": 1, "趋势运行(空)": 1,
-        "回调中(多)": 2, "反弹中(空)": 2,
-        "超买(多)": 3, "超卖(空)": 3,
-    }
-    cands.sort(key=lambda x: (priority.get(x["phase"], 4), -x["adx"]))
+    # 多头在前、空头在后，组内按 ADX 降序（趋势越强越靠前）
+    cands.sort(key=lambda x: (0 if x["dir"] == "多" else 1, -x["adx"]))
 
     if cands:
-        print(f"\nCANDIDATES({len(cands)}):")
+        print(f"\nSIGNALS({len(cands)}):")
         for r in cands:
-            print(f"  {r['name']}{r['dir']}{r['phase']}ADX={r['adx']:.0f}SRSI={r['s1']}/{r['s4']}")
+            print(f"  {r['name']}{r['dir']} SRSI(1d/4h/1h)={r['s1']}/{r['s4']}/{r['s1h']} ADX={r['adx']:.0f}")
 
     if token and cands:
-        h = '<div style="font-family:-apple-system,sans-serif;max-width:540px">'
-        h += '<h3 style="margin:0 0 6px">大趋势候选 (TrendWatch · SRSI+ADX)</h3>'
-        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">ADX(1D)&gt;25 的趋势币，按 SRSI 阶段分类　共 {len(cands)} 个</div>'
+        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
+        h += '<h3 style="margin:0 0 6px">SRSI 三周期共振 (TrendWatch)</h3>'
+        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80　共 {len(cands)} 个</div>'
         for r in cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
-            if r["phase"].startswith("第一波") or r["phase"].startswith("反弹观察"):
-                pcol = "#d35400"   # 可操作买/卖点 高亮
-            elif r["phase"].startswith("趋势运行"):
-                pcol = "#2980b9"
-            elif "超买" in r["phase"] or "超卖" in r["phase"]:
-                pcol = "#8e44ad"
-            else:
-                pcol = "#7f8c8d"
             p = fmt_p(r["price"], f"{r['name']}-USDT-SWAP")
-            h += f'<div style="margin:5px 0;padding:6px;background:#fff;border-left:3px solid {pcol}">'
-            h += f'<b>{r["name"]}</b> <span style="color:{color}">{r["dir"]}</span> '
-            h += f'<span style="color:{pcol}">{r["phase"]}</span> {p}<br>'
-            h += f'<span style="font-size:11px;color:#333">ADX={r["adx"]:.0f} | SRSI(1D/4H)={r["s1"]}/{r["s4"]}</span>'
+            h += f'<div style="margin:5px 0;padding:6px;background:#fff;border-left:3px solid {color}">'
+            h += f'<b>{r["name"]}</b> <span style="color:{color}">{r["dir"]}</span> {p}<br>'
+            h += f'<span style="font-size:11px;color:#333">SRSI(1d/4h/1h)={r["s1"]}/{r["s4"]}/{r["s1h"]} | ADX(1d)={r["adx"]:.0f}</span>'
             h += '</div>'
         h += '</div>'
         pl = {"token": token, "title": "TrendWatch", "content": h, "template": "html"}
