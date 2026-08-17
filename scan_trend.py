@@ -5,7 +5,8 @@ SRSI 三周期共振信号 (TrendWatch)
   多头：1d SRSI < 20  且 4h SRSI ∈ [10,40]  且 1h SRSI < 20
   空头：1d SRSI > 80  且 4h SRSI ∈ [60,90]  且 1h SRSI > 80
   三个周期必须同一方向，全部符合才推送。
-  ADX(1D) 仅作为趋势强度参考显示，不做过滤。
+  额外门槛：1h ADX > 20（1h 级别需存在趋势，过滤横盘噪音）。
+  ADX(1D) 作为趋势强度参考显示。
 扫描池复用 Top200(成交量) + 新币50，推送标题 TrendWatch。
 """
 import requests, time, os
@@ -104,8 +105,10 @@ def fmt_p(p, inst):
         return f"{p:.4f}"
     return f"{p:.6g}"
 
-def check_resonance(s1, s4, s1h):
-    """三周期 SRSI 共振：同一方向全部符合才返回方向，否则 None"""
+def check_resonance(s1, s4, s1h, adx1h):
+    """三周期 SRSI 共振 + 1h ADX>20：同一方向全部符合才返回方向，否则 None"""
+    if adx1h <= 20:          # 1h 级别无趋势（横盘）→ 过滤
+        return None
     # 多头：1d<20 且 4h∈[10,40] 且 1h<20
     if s1 < 20 and (10 <= s4 <= 40) and s1h < 20:
         return "多"
@@ -167,7 +170,9 @@ def main():
         s1h = srsi_last(kv1h)
         if s1 is None or s4 is None or s1h is None:
             continue
-        dirn = check_resonance(s1, s4, s1h)
+        adx1h, _, _ = calc_adx(c1h)
+        adx1h = adx1h if adx1h else 0
+        dirn = check_resonance(s1, s4, s1h, adx1h)
         if dirn is None:
             continue
         adx1, _, _ = calc_adx(c1d)
@@ -175,6 +180,7 @@ def main():
             "name": name, "dir": dirn,
             "s1": round(s1, 1), "s4": round(s4, 1), "s1h": round(s1h, 1),
             "adx": round(adx1, 1) if adx1 else 0,
+            "adx1h": round(adx1h, 1),
             "price": closes1[-1],
         })
         time.sleep(0.05)
@@ -191,18 +197,18 @@ def main():
     if cands:
         print(f"\nSIGNALS({len(cands)}):")
         for r in cands:
-            print(f"  {r['name']}{r['dir']} SRSI(1d/4h/1h)={r['s1']}/{r['s4']}/{r['s1h']} ADX={r['adx']:.0f}")
+            print(f"  {r['name']}{r['dir']} SRSI(1d/4h/1h)={r['s1']}/{r['s4']}/{r['s1h']} ADX(1d/1h)={r['adx']:.0f}/{r['adx1h']:.0f}")
 
     if token and cands:
         h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
         h += '<h3 style="margin:0 0 6px">SRSI 三周期共振 (TrendWatch)</h3>'
-        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80　共 {len(cands)} 个</div>'
+        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80 ｜ 且 1h ADX&gt;20　共 {len(cands)} 个</div>'
         for r in cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
             p = fmt_p(r["price"], f"{r['name']}-USDT-SWAP")
             h += f'<div style="margin:5px 0;padding:6px;background:#fff;border-left:3px solid {color}">'
             h += f'<b>{r["name"]}</b> <span style="color:{color}">{r["dir"]}</span> {p}<br>'
-            h += f'<span style="font-size:11px;color:#333">SRSI(1d/4h/1h)={r["s1"]}/{r["s4"]}/{r["s1h"]} | ADX(1d)={r["adx"]:.0f}</span>'
+            h += f'<span style="font-size:11px;color:#333">SRSI(1d/4h/1h)={r["s1"]}/{r["s4"]}/{r["s1h"]} | ADX(1d/1h)={r["adx"]:.0f}/{r["adx1h"]:.0f}</span>'
             h += '</div>'
         h += '</div>'
         pl = {"token": token, "title": "TrendWatch", "content": h, "template": "html"}
