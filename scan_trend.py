@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Trend Candidate Scanner — 监控“可能有大趋势的地方”
-基于 1D 级别：
-  强趋势   : ADX(1D) > 25
-  排列     : 多头 close>EMA50>EMA200 / 空头 close<EMA50<EMA200
-  清晰波   : 近200根涨跌波 > 30%
-并标注当前阶段：趋势运行中 / 第一波回调(观察买点) / 回调过深
-复用 scan_oversold 的指标函数与扫描池(Top200 + 新币50)
+Trend Candidate Scanner (SRSI + ADX 简化版)
+只用一个思路判断"哪里可能有大趋势"：
+  - ADX(1D) > 25  → 日线级别存在趋势
+  - SRSI(1D) 位置 → 判断趋势方向(>50多 / <50空)与所处阶段
+  - SRSI(4H) 拐头 → 给出更及时的进场/出场时点
+扫描池复用 Top200(成交量) + 新币50，推送标题 TrendWatch。
 """
 import requests, time, os
 
@@ -45,6 +44,28 @@ def calc_rsi(closes, period=14):
         rv.append(100 if al == 0 else 100 - 100 / (1 + ag / al))
     return rv
 
+def calc_stoch_rsi_series(closes, rsi_period=14, stoch_period=14, sk=3):
+    """返回 SRSI 序列(已做 %K 平滑)，便于取末值与判断拐头"""
+    rsi = calc_rsi(closes, rsi_period)
+    if not rsi or len(rsi) < stoch_period + sk:
+        return None
+    kr = []
+    for i in range(stoch_period - 1, len(rsi)):
+        w = rsi[i - stoch_period + 1:i + 1]; lo, hi = min(w), max(w)
+        kr.append(50 if hi == lo else (rsi[i] - lo) / (hi - lo) * 100)
+    kv = []
+    for i in range(sk - 1, len(kr)):
+        kv.append(sum(kr[i - sk + 1:i + 1]) / sk)
+    return kv
+
+def srsi_last(kv):
+    """返回 (末值, 是否拐头向上)"""
+    if not kv or len(kv) < 2:
+        return (kv[-1] if kv else None), None
+    last = (kv[-1] + (sum(kv[-3:]) / 3 if len(kv) >= 3 else kv[-1])) / 2
+    prev = (kv[-2] + (sum(kv[-4:-1]) / 3 if len(kv) >= 4 else kv[-2])) / 2
+    return last, last > prev
+
 def calc_adx(candles, period=14):
     n = len(candles)
     if n < period + 1:
@@ -77,16 +98,6 @@ def calc_adx(candles, period=14):
         av = (av * (period - 1) + dxv[i]) / period
     return av, sp / atrs * 100 if atrs > 0 else 0, sm / atrs * 100 if atrs > 0 else 0
 
-def calc_ema(closes, period):
-    n = len(closes)
-    if n < period:
-        return None
-    k = 2 / (period + 1)
-    ema = sum(closes[:period]) / period
-    for p in closes[period:]:
-        ema = p * k + ema * (1 - k)
-    return ema
-
 def fmt_p(p, inst):
     if "BTC" in inst or "ETH" in inst:
         return f"{p:.1f}"
@@ -96,35 +107,22 @@ def fmt_p(p, inst):
         return f"{p:.4f}"
     return f"{p:.6g}"
 
-def trend_state(close, ema50, ema200, low200, high200, high50, low50, adx, bull):
-    """返回 (is_candidate, phase, wave_pct)"""
-    if bull:
-        wave = (close - low200) / low200 * 100 if low200 > 0 else 0
-        pullback = (high50 - close) / high50 * 100 if high50 > 0 else 0
+def classify(s1, up1, s4, up4):
+    """只用 SRSI(1D/4H) 判断阶段，ADX>25 已由调用方保证"""
+    if up1:
+        if s1 >= 80:
+            return "超买(多)"
+        if s1 >= 50:
+            return "趋势运行(多)"
+        # 1D SRSI 落到 20~50：上升趋势里的回撤
+        return "第一波回调买点(多)" if up4 else "回调中(多)"
     else:
-        wave = (high200 - close) / high200 * 100 if high200 > 0 else 0
-        pullback = (close - low50) / low50 * 100 if low50 > 0 else 0
-    if adx is None or adx <= 25:
-        return False, None, round(wave, 1)
-    if wave < 30:
-        return False, None, round(wave, 1)
-    if ema200 is not None:
-        if bull and not (close > ema50 and ema50 > ema200):
-            return False, None, round(wave, 1)
-        if (not bull) and not (close < ema50 and ema50 < ema200):
-            return False, None, round(wave, 1)
-    else:
-        if bull and not close > ema50:
-            return False, None, round(wave, 1)
-        if (not bull) and not close < ema50:
-            return False, None, round(wave, 1)
-    if pullback < 8:
-        phase = "趋势运行中"
-    elif pullback <= 30 and ((bull and close > ema50) or (not bull and close < ema50)):
-        phase = "第一波回调(观察买点)"
-    else:
-        phase = "回调过深/转弱"
-    return True, phase, round(wave, 1)
+        if s1 <= 20:
+            return "超卖(空)"
+        if s1 <= 50:
+            return "趋势运行(空)"
+        # 1D SRSI 升到 50~80：下降趋势里的反弹
+        return "反弹观察(空)" if not up4 else "反弹中(空)"
 
 def main():
     EXCL = ["BRL", "EUR", "TRY", "DAI", "USDC", "RUB"]
@@ -132,7 +130,7 @@ def main():
     d = r.json()
     if d.get("code") != "0":
         print("Failed:", d); return
-    items = [(t["instId"], float(t.get("volCcy24h", 0))) for t in d["data"]
+    items = [(t["instIdOrInst"], float(t.get("volCcy24h", 0))) for t in d["data"]
              if "USDT" in t["instId"] and not any(x in t["instId"] for x in EXCL)]
     items.sort(key=lambda x: -x[1])
     vol_top = [i[0] for i in items[:200]]
@@ -161,32 +159,31 @@ def main():
     cands = []
     for s in syms:
         name = s.replace("-USDT-SWAP", "")
-        c1d = get_candles(s, "1D", 300)
-        if not c1d or len(c1d) < 200:
+        c1d = get_candles(s, "1D", 200)
+        c4h = get_candles(s, "4H", 100)
+        if not c1d or not c4h:
             continue
-        closes = [c["c"] for c in c1d]
-        adx, _, _ = calc_adx(c1d)
-        ema50 = calc_ema(closes, 50)
-        ema200 = calc_ema(closes, 200)
-        low200 = min(c["l"] for c in c1d[-200:])
-        high200 = max(c["h"] for c in c1d[-200:])
-        high50 = max(c["h"] for c in c1d[-50:])
-        low50 = min(c["l"] for c in c1d[-50:])
-        close = closes[-1]
-        for bull in (True, False):
-            ok, phase, wave = trend_state(close, ema50, ema200, low200, high200,
-                                          high50, low50, adx, bull)
-            if ok:
-                pullback = (high50 - close) / high50 * 100 if bull else (close - low50) / low50 * 100
-                cands.append({
-                    "name": name, "dir": "多" if bull else "空",
-                    "adx": round(adx, 1) if adx else 0,
-                    "wave": wave, "pullback": round(pullback, 1),
-                    "phase": phase, "price": close,
-                    "ema50": round(ema50, 4) if ema50 else 0,
-                    "ema200": round(ema200, 4) if ema200 else 0,
-                })
-                break
+        closes1 = [c["c"] for c in c1d]
+        closes4 = [c["c"] for c in c4h]
+        adx1, _, _ = calc_adx(c1d)
+        if adx1 is None or adx1 <= 25:      # 无日线级趋势 → 跳过
+            continue
+        kv1 = calc_stoch_rsi_series(closes1)
+        kv4 = calc_stoch_rsi_series(closes4)
+        if kv1 is None or kv4 is None:
+            continue
+        s1, up1 = srsi_last(kv1)
+        s4, up4 = srsi_last(kv4)
+        if s1 is None or s4 is None:
+            continue
+        phase = classify(s1, up1, s4, up4)
+        cands.append({
+            "name": name, "phase": phase,
+            "dir": "多" if s1 >= 50 else "空",
+            "adx": round(adx1, 1),
+            "s1": round(s1, 1), "s4": round(s4, 1),
+            "price": closes1[-1],
+        })
         time.sleep(0.05)
 
     token = os.environ.get("PUSHPLUS_TOKEN", "")
@@ -195,31 +192,38 @@ def main():
         if os.path.exists(tp):
             token = open(tp).read().strip()
 
-    phase_order = {"第一波回调(观察买点)": 0, "趋势运行中": 1, "回调过深/转弱": 2}
-    cands.sort(key=lambda x: (phase_order.get(x["phase"], 3), -x["adx"]))
+    priority = {
+        "第一波回调买点(多)": 0, "反弹观察(空)": 0,
+        "趋势运行(多)": 1, "趋势运行(空)": 1,
+        "回调中(多)": 2, "反弹中(空)": 2,
+        "超买(多)": 3, "超卖(空)": 3,
+    }
+    cands.sort(key=lambda x: (priority.get(x["phase"], 4), -x["adx"]))
 
     if cands:
         print(f"\nCANDIDATES({len(cands)}):")
         for r in cands:
-            print(f"  {r['name']}{r['dir']}{r['phase']}ADX={r['adx']:.0f}波={r['wave']}%回撤={r['pullback']}%")
+            print(f"  {r['name']}{r['dir']}{r['phase']}ADX={r['adx']:.0f}SRSI={r['s1']}/{r['s4']}")
 
     if token and cands:
-        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
-        h += '<h3 style="margin:0 0 6px">大趋势候选监控 (TrendWatch)</h3>'
-        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">1D 强趋势(ADX&gt;25)+EMA排列+涨跌波&gt;30%　共 {len(cands)} 个</div>'
+        h = '<div style="font-family:-apple-system,sans-serif;max-width:540px">'
+        h += '<h3 style="margin:0 0 6px">大趋势候选 (TrendWatch · SRSI+ADX)</h3>'
+        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">ADX(1D)&gt;25 的趋势币，按 SRSI 阶段分类　共 {len(cands)} 个</div>'
         for r in cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
-            if r["phase"].startswith("第一波"):
-                pcol = "#d35400"
-            elif r["phase"] == "趋势运行中":
+            if r["phase"].startswith("第一波") or r["phase"].startswith("反弹观察"):
+                pcol = "#d35400"   # 可操作买/卖点 高亮
+            elif r["phase"].startswith("趋势运行"):
                 pcol = "#2980b9"
+            elif "超买" in r["phase"] or "超卖" in r["phase"]:
+                pcol = "#8e44ad"
             else:
                 pcol = "#7f8c8d"
             p = fmt_p(r["price"], f"{r['name']}-USDT-SWAP")
-            h += f'<div style="margin:6px 0;padding:6px;background:#fff;border-left:3px solid {pcol}">'
+            h += f'<div style="margin:5px 0;padding:6px;background:#fff;border-left:3px solid {pcol}">'
             h += f'<b>{r["name"]}</b> <span style="color:{color}">{r["dir"]}</span> '
             h += f'<span style="color:{pcol}">{r["phase"]}</span> {p}<br>'
-            h += f'<span style="font-size:11px;color:#333">ADX={r["adx"]:.0f} | 波动={r["wave"]}% | 回撤={r["pullback"]}% | EMA50/200={r["ema50"]}/{r["ema200"]}</span>'
+            h += f'<span style="font-size:11px;color:#333">ADX={r["adx"]:.0f} | SRSI(1D/4H)={r["s1"]}/{r["s4"]}</span>'
             h += '</div>'
         h += '</div>'
         pl = {"token": token, "title": "TrendWatch", "content": h, "template": "html"}
@@ -228,6 +232,7 @@ def main():
             print("Push:", rp.json().get("code"))
         except Exception as e:
             print("Push error:", e)
+    return cands
 
 if __name__ == "__main__":
     main()
