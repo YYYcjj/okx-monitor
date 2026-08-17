@@ -11,10 +11,31 @@ SRSI 三周期共振信号 (TrendWatch)
   质量过滤（沿用 ExtremeSRSI）：ATR(1h) < 2% 且 4h 无插针。
   ADX(1D) 作为趋势强度参考显示。
 扫描池复用 Top100(成交量) + 新币50，推送标题 TrendWatch。
+去重：同一 CST 日期内同一币种只推送一次（状态存于 pushed_state.json）。
 """
-import requests, time, os
+import requests, time, os, json
+from datetime import datetime, timezone, timedelta
 
 OKX = "https://www.okx.com"
+
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pushed_state.json")
+
+def cst_date():
+    """当前 CST(UTC+8) 日期字符串，用于按天去重"""
+    return datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+
+def load_pushed():
+    """读取今天已推送过的币种集合（仅保留当天键，跨天自动重置）"""
+    today = cst_date()
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE) as f:
+                st = json.load(f)
+            if isinstance(st, dict):
+                return set(st.get(today, []))
+        except Exception:
+            pass
+    return set()
 
 def get_candles(inst, bar, limit=100):
     for _ in range(3):
@@ -256,19 +277,25 @@ def main():
         if os.path.exists(tp):
             token = open(tp).read().strip()
 
-    # 多头在前、空头在后，组内按 ADX 降序（趋势越强越靠前）
-    cands.sort(key=lambda x: (0 if x["dir"] == "多" else 1, -x["adx"]))
+    # 同日同币去重：今天已推送过的币种不再重复推送
+    pushed = load_pushed()
+    new_cands = [c for c in cands if c["name"] not in pushed]
+    if cands and not new_cands:
+        print(f"All {len(cands)} signal(s) already pushed today, skip.")
 
-    if cands:
-        print(f"\nSIGNALS({len(cands)}):")
-        for r in cands:
+    # 多头在前、空头在后，组内按 ADX 降序（趋势越强越靠前）
+    new_cands.sort(key=lambda x: (0 if x["dir"] == "多" else 1, -x["adx"]))
+
+    if new_cands:
+        print(f"\nNEW SIGNALS({len(new_cands)}):")
+        for r in new_cands:
             print(f"  {r['name']}{r['dir']} SRSI(1d/4h/1h)={r['s1']}/{r['s4']}/{r['s1h']} ADX(1d/1h)={r['adx']:.0f}/{r['adx1h']:.0f} ATR={r['atr1h']}%")
 
-    if token and cands:
-        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'
+    if token and new_cands:
+        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'  
         h += '<h3 style="margin:0 0 6px">SRSI 三周期共振 (TrendWatch)</h3>'
-        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80 ｜ 1h ADX&gt;20 ｜ 1h/4h方向与信号同向 ｜ ATR(1h)&lt;2% &amp; 4h无插针　共 {len(cands)} 个</div>'
-        for r in cands:
+        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80 ｜ 1h ADX&gt;20 ｜ 1h/4h方向与信号同向 ｜ ATR(1h)&lt;2% &amp; 4h无插针 ｜ 当日同币去重　共 {len(new_cands)} 个</div>'
+        for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
             p = fmt_p(r["price"], f"{r['name']}-USDT-SWAP")
             h += f'<div style="margin:5px 0;padding:6px;background:#fff;border-left:3px solid {color}">'
@@ -280,6 +307,11 @@ def main():
         try:
             rp = requests.post("http://www.pushplus.plus/send", json=pl, timeout=10)
             print("Push:", rp.json().get("code"))
+            # 推送成功 → 记录今日已推币种，便于跨运行去重，并标记需提交状态文件
+            pushed.update(c["name"] for c in new_cands)
+            with open(STATE_FILE, "w") as f:
+                json.dump({cst_date(): sorted(pushed)}, f)
+            open(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".need_commit"), "w").close()
         except Exception as e:
             print("Push error:", e)
     return cands
