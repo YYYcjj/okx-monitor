@@ -1,0 +1,26 @@
+name: Trend Candidate Watch
+
+on:
+  schedule:
+    # CST 9-23 每2小时 (UTC 1,3,5,7,9,11,13,15,17,19,21,23)
+    - cron: '0 1,3,5,7,9,11,13,15,17,19,21,23 * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests urllib3 --quiet
+
+      - name: Run trend candidate scanner
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
+        run: python scan_trend.py
