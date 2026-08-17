@@ -2,9 +2,16 @@ name: Trend Candidate Watch
 
 on:
   schedule:
-    # 每 1 小时扫描一次，有信号即推送（全时段）
-    - cron: '0 * * * *'
+    # 每 15 分钟扫描一次，有信号即推送（同日同币去重）
+    - cron: '*/15 * * * *'
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: trendwatch-scan
+  cancel-in-progress: false
 
 jobs:
   scan:
@@ -12,6 +19,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -24,3 +33,14 @@ jobs:
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
         run: python scan_trend.py
+
+      - name: Commit dedup state
+        if: success()
+        run: |
+          if [ -f .need_commit ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add pushed_state.json
+            git commit -m "chore: update trendwatch dedup state [skip ci]" || echo "nothing to commit"
+            git push
+          fi
