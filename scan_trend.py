@@ -6,6 +6,8 @@ SRSI 三周期共振信号 (TrendWatch)
   空头：1d SRSI > 80  且 4h SRSI ∈ [60,90]  且 1h SRSI > 80
   三个周期必须同一方向，全部符合才推送。
   额外门槛：1h ADX > 20（1h 级别需存在趋势，过滤横盘噪音）。
+  方向一致性：1h 与 4h 收盘价趋势方向（线性斜率）须与信号方向一致
+              —— 多头要求 1h、4h 均上行，空头要求 1h、4h 均下行；横盘/反向不推。
   质量过滤（沿用 ExtremeSRSI）：ATR(1h) < 2% 且 4h 无插针。
   ADX(1D) 作为趋势强度参考显示。
 扫描池复用 Top200(成交量) + 新币50，推送标题 TrendWatch。
@@ -111,6 +113,28 @@ def calc_atr(candles, period=14):
         atr = (atr * (period - 1) + tr[i]) / period
     return atr
 
+def trend_dir(closes, look=20, eps=0.0002):
+    """近 look 根收盘价的线性斜率方向（按价格归一化）。
+    返回 1 上行 / -1 下行 / 0 横盘或样本不足。
+    eps 为最小有效斜率门槛：低于该值视为横盘（中性），不计入方向。"""
+    cl = closes[-look:] if len(closes) >= look else closes
+    n = len(cl)
+    if n < 3:
+        return 0
+    x = list(range(n))
+    mx = sum(x) / n
+    my = sum(cl) / n
+    num = sum((x[i] - mx) * (cl[i] - my) for i in range(n))
+    den = sum((x[i] - mx) ** 2 for i in range(n))
+    if den == 0:
+        return 0
+    sl = num / den / my
+    if sl > eps:
+        return 1
+    if sl < -eps:
+        return -1
+    return 0
+
 def wick_ok(candles):
     """True = 干净 / 无插针（沿用 ExtremeSRSI 口径，检查近 20 根）"""
     wa = []; sp = 0
@@ -200,6 +224,14 @@ def main():
         dirn = check_resonance(s1, s4, s1h, adx1h)
         if dirn is None:
             continue
+        # 方向一致性：1h 与 4h 价格趋势方向(-1/0/1)须与信号方向一致
+        # 多头→两周期均为上行(1)，空头→两周期均为下行(-1)；横盘(0)或反向不推
+        d1h = trend_dir(closes1h)
+        d4h = trend_dir(closes4)
+        if dirn == "多" and not (d1h == 1 and d4h == 1):
+            continue
+        if dirn == "空" and not (d1h == -1 and d4h == -1):
+            continue
         # 质量过滤（沿用 ExtremeSRSI）：ATR(1h) < 2% 且 4h 无插针
         price = closes4[-1]
         atr1h = calc_atr(c1h)
@@ -235,7 +267,7 @@ def main():
     if token and cands:
         h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'
         h += '<h3 style="margin:0 0 6px">SRSI 三周期共振 (TrendWatch)</h3>'
-        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80 ｜ 且 1h ADX&gt;20 ｜ ATR(1h)&lt;2% &amp; 4h无插针　共 {len(cands)} 个</div>'
+        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80 ｜ 1h ADX&gt;20 ｜ 1h/4h方向与信号同向 ｜ ATR(1h)&lt;2% &amp; 4h无插针　共 {len(cands)} 个</div>'
         for r in cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
             p = fmt_p(r["price"], f"{r['name']}-USDT-SWAP")
