@@ -2,14 +2,14 @@
 """
 SRSI 双周期极值 + 4h 方向区 + 市场结构方向共振 (TrendWatch)
 规则（用户定义）：
-  多头：1d SRSI < 20  且 1h SRSI < 20  且 4h SRSI 在下半区[0,50]  且 1h 与 4h 市场结构方向一致（均上行）
-  空头：1d SRSI > 80  且 1h SRSI > 80  且 4h SRSI 在上半区[50,100]  且 1h 与 4h 市场结构方向一致（均下行）
-  4h 方向区：多头要求 SRSI(4h) ∈ [0,50]（下半区，未超买、有上行空间）；空头要求 SRSI(4h) ∈ [50,100]（上半区，未超卖、有下行空间）
-  方向（结构法）：用 swing 高低点判断市场结构（HH/HL、LH/LL）
-    上行(1) = 最近两个 swing high 走高(HH) 且 最近两个 swing low 走高(HL)
-    下行(-1)= 最近两个 swing high 走低(LH) 且 最近两个 swing low 走低(LL)
-    否则(结构混合/样本不足) = 0（横盘，不计入方向）
-  说明：仅保留用户要求的硬条件（1d+1h SRSI 极值 + 4h 方向区 + 1h/4h 结构方向一致）。
+  多头：1d SRSI < 20  且 1h SRSI < 20  且 4h SRSI 在明显下半区[0,40]  且 1h 与 4h 市场结构方向一致（均上行）
+  空头：1d SRSI > 80  且 1h SRSI > 80  且 4h SRSI 在明显上半区[60,100]  且 1h 与 4h 市场结构方向一致（均下行）
+  4h 方向区：多头要求 SRSI(4h) ∈ [0,40]（明显下半区，动量明确未超买、有上行空间）；空头要求 SRSI(4h) ∈ [60,100]（明显上半区，动量明确未超卖、有下行空间）
+  方向（结构法）：用 swing 高低点判断市场结构（HH/HL、LH/LL），并要求连续两个 swing 高低点差值超过最小摆幅(min_pct)以剔除噪声小波动
+    上行(1) = 最近两个 swing high 走高(HH) 且 最近两个 swing low 走高(HL)，且两组差值均 > min_pct*价格量级
+    下行(-1)= 最近两个 swing high 走低(LH) 且 最近两个 swing low 走低(LL)，且两组差值均 > min_pct*价格量级
+    否则(结构混合/样本不足/摆幅不足) = 0（横盘，不计入方向）
+  说明：仅保留用户要求的硬条件（1d+1h SRSI 极值 + 4h 方向区 + 1h/4h 结构方向一致）；结构方向带最小摆幅过滤(min_pct)以剔除噪声小波动。
 扫描池复用 Top100(成交量) + 新币50，推送标题 TrendWatch。
 去重：同一 CST 日期内同一币种只推送一次（状态存于 pushed_state.json）。
 """
@@ -21,6 +21,8 @@ OKX = "https://www.okx.com"
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pushed_state.json")
 
 SWING_P = 5  # swing 判定左右窗口（根）
+MIN_SWING_PCT_1H = 0.003  # 1h 结构最小摆幅（相对价格，0.3%）——过滤噪声小波动
+MIN_SWING_PCT_4H = 0.005  # 4h 结构最小摆幅（相对价格，0.5%）——过滤噪声小波动
 
 def cst_date():
     """当前 CST(UTC+8) 日期字符串，用于按天去重"""
@@ -105,32 +107,34 @@ def find_swings(highs, lows, p=SWING_P):
             sl.append((i, lows[i]))
     return sh, sl
 
-def structure_dir(highs, lows, p=SWING_P):
-    """市场结构方向（HH/HL/LH/LL）：
-    上行(1) = 最近两个 swing high 走高(HH) 且 最近两个 swing low 走高(HL)
-    下行(-1)= 最近两个 swing high 走低(LH) 且 最近两个 swing low 走低(LL)
-    否则(结构混合/样本不足) = 0（横盘，不计入方向）"""
+def structure_dir(highs, lows, p=SWING_P, min_pct=0.003):
+    """市场结构方向（HH/HL/LH/LL），带最小摆幅过滤：
+    上行(1) = 最近两个 swing high 走高(HH) 且 最近两个 swing low 走高(HL)，且两组差值均 > min_pct*价格量级
+    下行(-1)= 最近两个 swing high 走低(LH) 且 最近两个 swing low 走低(LL)，且两组差值均 > min_pct*价格量级
+    否则(结构混合/样本不足/摆幅不足) = 0（横盘，不计入方向）"""
     sh, sl = find_swings(highs, lows, p)
     if len(sh) < 2 or len(sl) < 2:
         return 0
     last_sh, prev_sh = sh[-1][1], sh[-2][1]
     last_sl, prev_sl = sl[-1][1], sl[-2][1]
-    if last_sh > prev_sh and last_sl > prev_sl:
+    ref = (last_sh + prev_sh + last_sl + prev_sl) / 4.0
+    min_move = ref * min_pct
+    if last_sh - prev_sh > min_move and last_sl - prev_sl > min_move:
         return 1
-    if last_sh < prev_sh and last_sl < prev_sl:
+    if prev_sh - last_sh > min_move and prev_sl - last_sl > min_move:
         return -1
     return 0
 
 def check_signal(s1, s1h, s4, d1h, d4h):
     """双周期 SRSI 极值 + 4h 方向区 + 1h/4h 市场结构方向一致。
-    多：1d<20 且 1h<20 且 SRSI(4h)∈[0,50] 且 1h 上行(HH+HL) & 4h 上行(HH+HL)
-    空：1d>80 且 1h>80 且 SRSI(4h)∈[50,100] 且 1h 下行(LH+LL) & 4h 下行(LH+LL)
+    多：1d<20 且 1h<20 且 SRSI(4h)∈[0,40] 且 1h 上行(HH+HL) & 4h 上行(HH+HL)
+    空：1d>80 且 1h>80 且 SRSI(4h)∈[60,100] 且 1h 下行(LH+LL) & 4h 下行(LH+LL)
     方向必须同向且非横盘；SRSI 极值方向与交易方向一致。
     """
-    # 4h 方向区：多头要求下半区[0,50](未超买、有上行空间)，空头要求上半区[50,100](未超卖、有下行空间)
-    if d1h == 1 and d4h == 1 and s1 < 20 and s1h < 20 and 0 <= s4 <= 50:
+    # 4h 方向区：多头要求明显下半区[0,40](动量明确未超买、有上行空间)，空头要求明显上半区[60,100](动量明确未超卖、有下行空间)
+    if d1h == 1 and d4h == 1 and s1 < 20 and s1h < 20 and 0 <= s4 <= 40:
         return "多"
-    if d1h == -1 and d4h == -1 and s1 > 80 and s1h > 80 and 50 <= s4 <= 100:
+    if d1h == -1 and d4h == -1 and s1 > 80 and s1h > 80 and 60 <= s4 <= 100:
         return "空"
     return None
 
@@ -200,9 +204,9 @@ def main():
         s4 = srsi_last(kv4)
         if s1 is None or s1h is None or s4 is None:
             continue
-        # 方向：1h 与 4h 市场结构（HH/HL/LH/LL）
-        d1h = structure_dir(highs1h, lows1h)
-        d4h = structure_dir(highs4, lows4)
+        # 方向：1h 与 4h 市场结构（HH/HL/LH/LL），带最小摆幅过滤
+        d1h = structure_dir(highs1h, lows1h, min_pct=MIN_SWING_PCT_1H)
+        d4h = structure_dir(highs4, lows4, min_pct=MIN_SWING_PCT_4H)
         dirn = check_signal(s1, s1h, s4, d1h, d4h)
         if dirn is None:
             continue
@@ -241,7 +245,7 @@ def main():
     if token and new_cands:
         h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'
         h += '<h3 style="margin:0 0 6px">SRSI 双周期极值 + 结构方向共振 (TrendWatch)</h3>'
-        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 1h&lt;20 &amp; 4h∈[0,50] &amp; 1h/4h结构同向上行(HH+HL) ｜ 空:1d&gt;80 &amp; 1h&gt;80 &amp; 4h∈[50,100] &amp; 1h/4h结构同向下行(LH+LL) ｜ 当日同币去重　共 {len(new_cands)} 个</div>'
+        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 1h&lt;20 &amp; 4h∈[0,40] &amp; 1h/4h结构同向上行(HH+HL) ｜ 空:1d&gt;80 &amp; 1h&gt;80 &amp; 4h∈[60,100] &amp; 1h/4h结构同向下行(LH+LL) ｜ 当日同币去重　共 {len(new_cands)} 个</div>'
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
             p = fmt_p(r["price"], f"{r['name']}-USDT-SWAP")
