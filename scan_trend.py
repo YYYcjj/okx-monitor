@@ -6,9 +6,9 @@ SRSI 三周期共振信号 (TrendWatch)
   空头：1d SRSI > 80  且 4h SRSI ∈ [60,90]  且 1h SRSI > 80
   三个周期必须同一方向，全部符合才推送。
   额外门槛：1h ADX > 20（1h 级别需存在趋势，过滤横盘噪音）。
-  方向一致性：1h 与 4h 收盘价趋势方向（线性斜率）须与信号方向一致
-              —— 多头要求 1h、4h 均上行，空头要求 1h、4h 均下行；横盘/反向不推。
-  质量过滤（沿用 ExtremeSRSI）：ATR(1h) < 2% 且 4h 无插针。
+  方向一致性：1h 看「SRSI 拐头方向」(多头转上/空头转下)，4h 看「价格方向」(多头上行/空头下行)。
+              —— 修正原写法：原要求 1h 价格斜率与 1h SRSI 极值同向，同一周期互斥，永远触发不了。
+  质量过滤（沿用 ExtremeSRSI）：ATR(1h) < 2% 且 4h 无极端插针(放宽版)。
   ADX(1D) 作为趋势强度参考显示。
 扫描池复用 Top100(成交量) + 新币50，推送标题 TrendWatch。
 去重：同一 CST 日期内同一币种只推送一次（状态存于 pushed_state.json）。
@@ -156,15 +156,41 @@ def trend_dir(closes, look=20, eps=0.0002):
         return -1
     return 0
 
+def srsi_turn(kv, look=10):
+    """1h SRSI 序列近 look 根的线性斜率方向（归一化）。
+    返回 >0 拐头向上 / <0 拐头向下 / 0 横盘。
+    用于「指标方向」判定：多头要求 SRSI 自超卖区拐头向上，空头要求自超买区拐头向下。
+    比 raw 价格斜率更合理——同一周期上 1h SRSI<20 与 1h 价格上行互斥，但 1h SRSI<20 且正在回升是成立的。"""
+    if kv is None or len(kv) < look:
+        return 0
+    w = kv[-look:]
+    n = len(w)
+    x = list(range(n))
+    mx = sum(x) / n
+    my = sum(w) / n
+    num = sum((x[i] - mx) * (w[i] - my) for i in range(n))
+    den = sum((x[i] - mx) ** 2 for i in range(n))
+    if den == 0:
+        return 0
+    sl = num / den / my
+    eps = 1e-4
+    if sl > eps:
+        return 1
+    if sl < -eps:
+        return -1
+    return 0
+
 def wick_ok(candles):
-    """True = 干净 / 无插针（沿用 ExtremeSRSI 口径，检查近 20 根）"""
+    """True = 无极端插针（放宽版：检查近 20 根）。
+    平均影线/实体比 < 4 且 单根 >5 的极端插针 <= 4 根。
+    说明：抓「刚启动的活跃行情」时币通常有插针，原 avg<3 & spike<=2 会把活跃币全杀掉，故放宽。"""
     wa = []; sp = 0
     for c in candles[-20:]:
         body = max(abs(c["c"] - c["o"]), 1e-10)
         uw = c["h"] - max(c["c"], c["o"]); lw = min(c["c"], c["o"]) - c["l"]
         r = min((uw + lw) / body, 10); wa.append(r)
-        if r > 4: sp += 1
-    return sum(wa) / len(wa) < 3 and sp <= 2
+        if r > 5: sp += 1
+    return sum(wa) / len(wa) < 4 and sp <= 4
 
 def fmt_p(p, inst):
     if "BTC" in inst or "ETH" in inst:
@@ -245,13 +271,15 @@ def main():
         dirn = check_resonance(s1, s4, s1h, adx1h)
         if dirn is None:
             continue
-        # 方向一致性：1h 与 4h 价格趋势方向(-1/0/1)须与信号方向一致
-        # 多头→两周期均为上行(1)，空头→两周期均为下行(-1)；横盘(0)或反向不推
-        d1h = trend_dir(closes1h)
+        # 方向一致性（修正：避免与 1h SRSI 极值自相矛盾）
+        #   1h 用「指标拐头方向」：多头要求 1h SRSI 自超卖区拐头向上，空头要求自超买区拐头向下
+        #   4h 用「价格方向」：多头要求 4h 价格上行，空头要求 4h 价格下行
+        # 注：原写法要求 1h 价格斜率与 1h SRSI 极值同向，二者在同一周期互斥(0/147 命中)，已废弃。
+        s1h_turn = srsi_turn(kv1h)
         d4h = trend_dir(closes4)
-        if dirn == "多" and not (d1h == 1 and d4h == 1):
+        if dirn == "多" and not (s1h_turn > 0 and d4h == 1):
             continue
-        if dirn == "空" and not (d1h == -1 and d4h == -1):
+        if dirn == "空" and not (s1h_turn < 0 and d4h == -1):
             continue
         # 质量过滤（沿用 ExtremeSRSI）：ATR(1h) < 2% 且 4h 无插针
         price = closes4[-1]
@@ -292,9 +320,9 @@ def main():
             print(f"  {r['name']}{r['dir']} SRSI(1d/4h/1h)={r['s1']}/{r['s4']}/{r['s1h']} ADX(1d/1h)={r['adx']:.0f}/{r['adx1h']:.0f} ATR={r['atr1h']}%")
 
     if token and new_cands:
-        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'  
+        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'
         h += '<h3 style="margin:0 0 6px">SRSI 三周期共振 (TrendWatch)</h3>'
-        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80 ｜ 1h ADX&gt;20 ｜ 1h/4h方向与信号同向 ｜ ATR(1h)&lt;2% &amp; 4h无插针 ｜ 当日同币去重　共 {len(new_cands)} 个</div>'
+        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 4h∈[10,40] &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 4h∈[60,90] &amp; 1h&gt;80 ｜ 1h ADX&gt;20 ｜ 1h SRSI拐头+4h价格同向 ｜ ATR(1h)&lt;2% &amp; 4h无极端插针 ｜ 当日同币去重　共 {len(new_cands)} 个</div>'
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
             p = fmt_p(r["price"], f"{r['name']}-USDT-SWAP")
