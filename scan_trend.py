@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-SRSI 双周期极值 + 市场结构方向共振 (TrendWatch)
+SRSI 双周期极值 + 4h 中性区 + 市场结构方向共振 (TrendWatch)
 规则（用户定义）：
-  多头：1d SRSI < 20  且 1h SRSI < 20  且 1h 与 4h 市场结构方向一致（均上行）
-  空头：1d SRSI > 80  且 1h SRSI > 80  且 1h 与 4h 市场结构方向一致（均下行）
+  多头：1d SRSI < 20  且 1h SRSI < 20  且 4h SRSI 在中性区[30,70]  且 1h 与 4h 市场结构方向一致（均上行）
+  空头：1d SRSI > 80  且 1h SRSI > 80  且 4h SRSI 在中性区[30,70]  且 1h 与 4h 市场结构方向一致（均下行）
+  4h 中性区：30 <= SRSI(4h) <= 70（即 4h 不大于70 且 不小于30，避免在 4h 已极端时入场）
   方向（结构法）：用 swing 高低点判断市场结构（HH/HL、LH/LL）
     上行(1) = 最近两个 swing high 走高(HH) 且 最近两个 swing low 走高(HL)
     下行(-1)= 最近两个 swing high 走低(LH) 且 最近两个 swing low 走低(LL)
     否则(结构混合/样本不足) = 0（横盘，不计入方向）
-  说明：去掉了 ADX>20 / ATR(1h)<2% / 4h 无插针 / 4h SRSI 区间 等附加门槛，
-        只保留用户要求的两条硬条件（双周期 SRSI 极值 + 1h/4h 结构方向一致）。
+  说明：仅保留用户要求的硬条件（1d+1h SRSI 极值 + 4h 中性区 + 1h/4h 结构方向一致）。
 扫描池复用 Top100(成交量) + 新币50，推送标题 TrendWatch。
 去重：同一 CST 日期内同一币种只推送一次（状态存于 pushed_state.json）。
 """
@@ -121,12 +121,15 @@ def structure_dir(highs, lows, p=SWING_P):
         return -1
     return 0
 
-def check_signal(s1, s1h, d1h, d4h):
-    """双周期 SRSI 极值 + 1h/4h 市场结构方向一致。
-    多：1d<20 且 1h<20 且 1h 上行(HH+HL) & 4h 上行(HH+HL)
-    空：1d>80 且 1h>80 且 1h 下行(LH+LL) & 4h 下行(LH+LL)
+def check_signal(s1, s1h, s4, d1h, d4h):
+    """双周期 SRSI 极值 + 4h 中性区 + 1h/4h 市场结构方向一致。
+    多：1d<20 且 1h<20 且 30<=SRSI(4h)<=70 且 1h 上行(HH+HL) & 4h 上行(HH+HL)
+    空：1d>80 且 1h>80 且 30<=SRSI(4h)<=70 且 1h 下行(LH+LL) & 4h 下行(LH+LL)
     方向必须同向且非横盘；SRSI 极值方向与交易方向一致。
     """
+    # 4h 中性区：避免在 4h 已极端（>70 超买 / <30 超卖）时入场
+    if not (30 <= s4 <= 70):
+        return None
     if d1h == 1 and d4h == 1 and s1 < 20 and s1h < 20:
         return "多"
     if d1h == -1 and d4h == -1 and s1 > 80 and s1h > 80:
@@ -191,21 +194,23 @@ def main():
         lows4 = [c["l"] for c in c4h]
         kv1 = calc_stoch_rsi_series(closes1)
         kv1h = calc_stoch_rsi_series(closes1h)
-        if kv1 is None or kv1h is None:
+        kv4 = calc_stoch_rsi_series(closes4)
+        if kv1 is None or kv1h is None or kv4 is None:
             continue
         s1 = srsi_last(kv1)
         s1h = srsi_last(kv1h)
-        if s1 is None or s1h is None:
+        s4 = srsi_last(kv4)
+        if s1 is None or s1h is None or s4 is None:
             continue
         # 方向：1h 与 4h 市场结构（HH/HL/LH/LL）
         d1h = structure_dir(highs1h, lows1h)
         d4h = structure_dir(highs4, lows4)
-        dirn = check_signal(s1, s1h, d1h, d4h)
+        dirn = check_signal(s1, s1h, s4, d1h, d4h)
         if dirn is None:
             continue
         cands.append({
             "name": name, "dir": dirn,
-            "s1": round(s1, 1), "s1h": round(s1h, 1),
+            "s1": round(s1, 1), "s1h": round(s1h, 1), "s4": round(s4, 1),
             "d1h": d1h, "d4h": d4h,
             "price": closes1[-1],
         })
@@ -233,18 +238,18 @@ def main():
     if new_cands:
         print(f"\nNEW SIGNALS({len(new_cands)}):")
         for r in new_cands:
-            print(f"  {r['name']}{r['dir']} SRSI(1d/1h)={r['s1']}/{r['s1h']} str(1h/4h)={r['d1h']}/{r['d4h']} price={r['price']}")
+            print(f"  {r['name']}{r['dir']} SRSI(1d/1h/4h)={r['s1']}/{r['s1h']}/{r['s4']} str(1h/4h)={r['d1h']}/{r['d4h']} price={r['price']}")
 
     if token and new_cands:
-        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'
+        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
         h += '<h3 style="margin:0 0 6px">SRSI 双周期极值 + 结构方向共振 (TrendWatch)</h3>'
-        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 1h&lt;20 &amp; 1h/4h结构同向上行(HH+HL) ｜ 空:1d&gt;80 &amp; 1h&gt;80 &amp; 1h/4h结构同向下行(LH+LL) ｜ 当日同币去重　共 {len(new_cands)} 个</div>'
+        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 1h&lt;20 &amp; 4h∈[30,70] &amp; 1h/4h结构同向上行(HH+HL) ｜ 空:1d&gt;80 &amp; 1h&gt;80 &amp; 4h∈[30,70] &amp; 1h/4h结构同向下行(LH+LL) ｜ 当日同币去重　共 {len(new_cands)} 个</div>'
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
             p = fmt_p(r["price"], f"{r['name']}-USDT-SWAP")
             h += f'<div style="margin:5px 0;padding:6px;background:#fff;border-left:3px solid {color}">'
             h += f'<b>{r["name"]}</b> <span style="color:{color}">{r["dir"]}</span> {p}<br>'
-            h += f'<span style="font-size:11px;color:#333">SRSI(1d/1h)={r["s1"]}/{r["s1h"]} | 结构(1h/4h)={r["d1h"]}/{r["d4h"]}</span>'
+            h += f'<span style="font-size:11px;color:#333">SRSI(1d/1h/4h)={r["s1"]}/{r["s1h"]}/{r["s4"]} | 结构(1h/4h)={r["d1h"]}/{r["d4h"]}</span>'
             h += '</div>'
         h += '</div>'
         pl = {"token": token, "title": "TrendWatch", "content": h, "template": "html"}
