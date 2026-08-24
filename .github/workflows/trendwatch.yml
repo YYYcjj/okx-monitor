@@ -1,0 +1,42 @@
+name: TrendWatch (SRSI 双周期 + 质量门)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests --quiet
+
+      - name: Run TrendWatch scanner
+        run: python scan_trend.py
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK || '' }}
+
+      - name: Commit dedup state
+        if: always()
+        run: |
+          git config user.name "OKX Bot"
+          git config user.email "bot@okx.local"
+          git add pushed_state.json 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No dedup state change"
+          else
+            git commit -m "[auto] TrendWatch 去重状态" && git push
+          fi
