@@ -339,7 +339,8 @@ def main():
             print(f"  {r['name']}{r['dir']} SRSI(1d/1h/4h)={r['s1']}/{r['s1h']}/{r['s4']} ADX(1h)={r['adx']:.0f} ATR/价={r['atrr']*100:.2f}% 结构(1h/4h)={r['d1h']}/{r['d4h']} price={r['price']}")
 
     if token and new_cands:
-        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'n        h += '<h3 style="margin:0 0 6px">SRSI 双周期极值 + 质量门 (TrendWatch)</h3>'
+        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'
+        h += '<h3 style="margin:0 0 6px">SRSI 双周期极值 + 质量门 (TrendWatch)</h3>'
         h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 1h&gt;80 ｜ 质量门:1h ADX&gt;{ADX_THRESHOLD} &amp; 无极端插针 &amp; ATR/价&gt;{ATR_MIN_RATIO*100:.1f}%　共 {len(new_cands)} 个</div>'
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
