@@ -13,6 +13,7 @@ SRSI 双周期极值 + 质量门(ADX/插针/ATR) 共振 (TrendWatch)
         结构方向(HH/HL/LH/LL)仍计算并展示于推送，仅作参考、不再作为信号条件。
 扫描池复用 Top100(成交量) + 新币50，推送标题 TrendWatch。
 去重：同一 CST 日期内同一币种只推送一次（状态存于 pushed_state.json）。
+股票相关币种（代币化股票 + 名称含股票关键词）已加入黑名单，扫描时跳过、不推送（2026-08-25）。
 """
 import requests, time, os, json
 from datetime import datetime, timezone, timedelta
@@ -33,6 +34,30 @@ ATR_MIN_RATIO = 0.005   # ATR/价格 > 0.5%，波动足够才有交易空间（�
 WICK_LOOKBACK = 20      # 最近 20 根 1h K 线评估插针
 WICK_AVG_MAX = 4.0      # 平均影线占比上限（参考早期版 avg<4）
 WICK_SPIKE_MAX = 4.0    # 单根最大影线占比上限（参考早期版 spike<=4）
+
+# ---- 股票相关币种黑名单（不推送）----
+# 用户要求（2026-08-25）：TrendWatch 不推荐股票相关币种。
+# 两类：①代币化股票（常见美股 ticker）；②名称含股票关键词。
+STOCK_TICKERS = {
+    # 科技 / 美股龙头
+    "TSLA","AAPL","NVDA","AMZN","GOOGL","GOOG","META","FB","MSFT","NFLX",
+    "COIN","TWTR","NIO","BABA","JD","PDD","BIDU","XPEV","LCID","RIVN","PLTR",
+    "AMD","INTC","IBM","ORCL","CRM","ADBE","PYPL","UBER","LYFT","SNAP","SQ",
+    "SHOP","ROKU","PINS","Z","DOCU","OKTA","NOW","TEAM","CRWD","NET","ZS",
+    "SNOW","DDOG","MDB","TWLO","ZM","CHWY","ETSY","MRNA","BNTX","PFE","JNJ",
+    "KO","PEP","MCD","SBUX","DIS","BA","GE","CAT","WMT","TGT","HD","LOW",
+    "COST","XOM","CVX","BAC","JPM","GS","WFC","C","V","MA",
+    # 指数 / ETF 类
+    "SPY","QQQ","DIA","VOO","IWM","ARKK","UVXY","VIX",
+}
+STOCK_KEYWORDS = ("STOCK", "SHARE", "EQUITY", "STK", "股票")
+
+def is_stock_related(name: str) -> bool:
+    """判断币种是否为股票相关（代币化股票或名称含股票关键词），命中则不推送。"""
+    n = name.upper()
+    if n in STOCK_TICKERS:
+        return True
+    return any(k in n for k in STOCK_KEYWORDS)
 
 def cst_date():
     """当前 CST(UTC+8) 日期字符串，用于按天去重"""
@@ -267,8 +292,12 @@ def main():
     print(f"Scan pool: {len(vol_top)} vol-top + {len(new_coins)} new = {len(syms)} unique...")
 
     cands = []
+    skipped_stock = 0
     for s in syms:
         name = s.replace("-USDT-SWAP", "")
+        if is_stock_related(name):
+            skipped_stock += 1
+            continue
         c1d = get_candles(s, "1D", 200)
         c4h = get_candles(s, "4H", 100)
         c1h = get_candles(s, "1H", 100)
@@ -314,6 +343,7 @@ def main():
         })
         time.sleep(0.05)
 
+    print(f"Skipped stock-related symbols: {skipped_stock}")
     token = os.environ.get("PUSHPLUS_TOKEN", "")
     if not token:
         tp = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".pushplus_token")
