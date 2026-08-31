@@ -8,7 +8,7 @@ on:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -23,8 +23,12 @@ jobs:
       - name: Install deps
         run: pip install requests --quiet
 
-      - name: Run TrendWatch scanner
-        run: python scan_trend.py
+      - name: Run TrendWatch scanner (loop x4, ~90s gap)
+        run: |
+          for i in 1 2 3 4; do
+            python scan_trend.py
+            if [ "$i" -lt 4 ]; then sleep 90; fi
+          done
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK || '' }}
