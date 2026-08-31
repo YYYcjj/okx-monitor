@@ -7,7 +7,7 @@ SRSI 双周期极值 + 质量门(ADX/插针/ATR) 共振 (TrendWatch)
     空头：1d SRSI > 80  且 1h SRSI > 80
   质量门（基础过滤，要求不变，沿用主策略/早期版标准）：
     1h ADX > 20        ：确认有足够趋势动能（滤掉无趋势震荡）
-    无极端插针(wick)   ：最近 WICK_LOOKBACK 根平均影线占比<WICK_AVG_MAX 且单根最大<=WICK_SPIKE_MAX（参考早期版 avg<4 & spike<=4）
+    无极端插针(wick)   ：最近 WICK_LOOKBACK 根平均影线占比<WICK_AVG_MAX 且单根最大<=WICK_SPIKE_MAX（2026-08-31 放宽 avg<6 & spike<=10，并修 doji 误杀）
     ATR/价格 > 阈值     ：波动足够、有交易空间（ATR_MIN_RATIO，默认 0.5%，可微调）
   说明：已去掉原 4h SRSI 方向区与 1h/4h 市场结构方向一致要求（原规则信号太少，放宽）。
         结构方向(HH/HL/LH/LL)仍计算并展示于推送，仅作参考、不再作为信号条件。
@@ -32,8 +32,8 @@ ADX_THRESHOLD = 20      # 1h ADX > 20 确认趋势动能足够
 ATR_PERIOD = 14
 ATR_MIN_RATIO = 0.005   # ATR/价格 > 0.5%，波动足够才有交易空间（可微调）
 WICK_LOOKBACK = 20      # 最近 20 根 1h K 线评估插针
-WICK_AVG_MAX = 4.0      # 平均影线占比上限（参考早期版 avg<4）
-WICK_SPIKE_MAX = 4.0    # 单根最大影线占比上限（参考早期版 spike<=4）
+WICK_AVG_MAX = 6.0      # 平均影线占比上限（放宽：原 4.0 对 1h K 线过严，单根插针即误杀）
+WICK_SPIKE_MAX = 10.0    # 单根最大影线占比上限（放宽：保留对真实插针泵/砸的过滤）
 
 # ---- 股票相关币种黑名单（不推送）----
 # 用户要求（2026-08-25）：TrendWatch 不推荐股票相关币种。
@@ -183,7 +183,9 @@ def calc_atr(highs, lows, closes, period=ATR_PERIOD):
 def wick_ok(highs, lows, opens, closes, lookback=WICK_LOOKBACK,
             avg_max=WICK_AVG_MAX, spike_max=WICK_SPIKE_MAX):
     """剔除极端插针币：最近 lookback 根 K 线，每根取较大影线占比(max(上影,下影)/实体)，
-    要求平均占比<avg_max 且单根最大<=spike_max。实体过小(十字星)用(h-l)近似。"""
+    要求平均占比<avg_max 且单根最大<=spike_max。
+    修复(2026-08-31)：实体过小(十字星)原分支 ratio=(h-l)/(h*1e-6)≈上千倍必杀，
+    改为用中间价 0.1% 作实体下限(eff_body)，使 doji 的 ratio 回到合理量级(range/price 量级)，不再误杀。"""
     n = len(closes)
     if n < lookback:
         return True
@@ -192,13 +194,11 @@ def wick_ok(highs, lows, opens, closes, lookback=WICK_LOOKBACK,
         o, c = opens[i], closes[i]
         h, l = highs[i], lows[i]
         body = abs(c - o)
-        if body <= 1e-9:
-            ratio = (h - l) / (h * 1e-6) if h > 0 else 0.0
-        else:
-            up = (h - max(o, c)) / body
-            dn = (min(o, c) - l) / body
-            ratio = max(up, dn)
-        ratios.append(ratio)
+        ref = (h + l) / 2.0
+        eff_body = body if body > ref * 1e-3 else ref * 1e-3  # 实体下限=中间价 0.1%，防 doji 爆量
+        up = (h - max(o, c)) / eff_body
+        dn = (min(o, c) - l) / eff_body
+        ratios.append(max(up, dn))
     avg = sum(ratios) / len(ratios)
     mx = max(ratios)
     return avg < avg_max and mx <= spike_max
