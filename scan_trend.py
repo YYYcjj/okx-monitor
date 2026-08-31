@@ -77,10 +77,12 @@ def load_pushed():
     return set()
 
 def get_candles(inst, bar, limit=100):
-    for _ in range(3):
+    for _ in range(4):
         try:
             r = requests.get(f"{OKX}/api/v5/market/candles",
                              params={"instId": inst, "bar": bar, "limit": limit}, timeout=12)
+            if r.status_code == 429:
+                time.sleep(2.0); continue  # 触发频率限制，退避后重试
             d = r.json()
             if d.get("code") == "0":
                 candles = []
@@ -91,6 +93,7 @@ def get_candles(inst, bar, limit=100):
                 return candles
         except Exception:
             time.sleep(0.5)
+        time.sleep(0.06)  # 轻量限流，避免触发 OKX 公共 API 频率限制
     return None
 
 def calc_rsi(closes, period=14):
@@ -268,7 +271,7 @@ def main():
     items = [(t["instId"], float(t.get("volCcy24h", 0))) for t in d["data"]
              if "USDT" in t["instId"] and not any(x in t["instId"] for x in EXCL)]
     items.sort(key=lambda x: -x[1])
-    vol_top = [i[0] for i in items[:100]]
+    vol_top = [i[0] for i in items[:300]]
 
     new_coins = []
     try:
@@ -281,7 +284,7 @@ def main():
                     lt = it.get("listTime") or 0
                     insts.append((it["instId"], int(lt)))
             insts.sort(key=lambda x: -x[1])
-            new_coins = [i[0] for i in insts[:50]]
+            new_coins = [i[0] for i in insts[:100]]
     except Exception as e:
         print(f"new-coins fetch failed: {e}")
 
