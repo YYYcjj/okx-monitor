@@ -23,7 +23,7 @@ OKX = "https://www.okx.com"
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pushed_state.json")
 
 SWING_P = 5  # swing 判定左右窗口（根）
-MIN_SWING_PCT_1H = 0.003  # 1h 结构最小摆幅（相对价格，0.3%）——过滤噪声小波动
+MIN_SWING_PCT_1H = 0.005  # 1h 结构最小摆幅（相对价格，0.5%）——过滤噪声小波动（2026-09-01 由 0.3% 收紧至 0.5%）
 MIN_SWING_PCT_4H = 0.005  # 4h 结构最小摆幅（相对价格，0.5%）——过滤噪声小波动
 MIN_SWING_PCT_1D = 0.01   # 1d 结构最小摆幅（相对价格，1%）——日线级，过滤噪声（2026-09-01 新增方向过滤用）
 
@@ -275,9 +275,9 @@ def main():
     items = [(t["instId"], float(t.get("volCcy24h", 0))) for t in d["data"]
              if "USDT" in t["instId"] and not any(x in t["instId"] for x in EXCL)]
     items.sort(key=lambda x: -x[1])
-    vol_top = [i[0] for i in items[:50]]  # 仅扫描成交量前 50（2026-09-01 收窄）
+    vol_top = [i[0] for i in items[:100]]  # 扫描成交量前 100（2026-09-01 由 50 放宽至 100）
 
-    new_coins = []  # 不再扫描新币池，只保留成交量前 50
+    new_coins = []  # 不再扫描新币池，只保留成交量前 100
 
     seen = set(); syms = []
     for s in vol_top + new_coins:
@@ -366,7 +366,7 @@ def main():
             print(f"  {r['name']}{r['dir']} SRSI(1d/1h/4h)={r['s1']}/{r['s1h']}/{r['s4']} ADX(1h)={r['adx']:.0f} ATR/价={r['atrr']*100:.2f}% 结构(1h/1d)={r['d1h']}/{r['d1d']} price={r['price']}")
 
     if token and new_cands:
-        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
+        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'
         h += '<h3 style="margin:0 0 6px">SRSI 双周期极值 + 质量门 (TrendWatch)</h3>'
         h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&amp;1h SRSI&lt;20 且 1h/1d 结构同向多头 ｜ 空:1d&amp;1h SRSI&gt;80 且 1h/1d 结构同向空头 ｜ 质量门:1h ADX&gt;{ADX_THRESHOLD} &amp; 无极端插针 &amp; ATR/价&gt;{ATR_MIN_RATIO*100:.1f}%　共 {len(new_cands)} 个</div>'
         for r in new_cands:
