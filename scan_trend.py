@@ -25,6 +25,7 @@ STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pushed_st
 SWING_P = 5  # swing 判定左右窗口（根）
 MIN_SWING_PCT_1H = 0.003  # 1h 结构最小摆幅（相对价格，0.3%）——过滤噪声小波动
 MIN_SWING_PCT_4H = 0.005  # 4h 结构最小摆幅（相对价格，0.5%）——过滤噪声小波动
+MIN_SWING_PCT_1D = 0.01   # 1d 结构最小摆幅（相对价格，1%）——日线级，过滤噪声（2026-09-01 新增方向过滤用）
 
 # ---- 质量门阈值（沿用主策略/早期版既定标准，要求不变） ----
 ADX_PERIOD = 14
@@ -237,10 +238,11 @@ def structure_dir(highs, lows, p=SWING_P, min_pct=0.003):
         return -1
     return 0
 
-def check_signal(s1, s1h, adx1h, atr_ratio, wick_ok_flag):
-    """主信号(1d+1h SRSI 极值) + 质量门(ADX/插针/ATR)。
-    多：1d<20 & 1h<20  空：1d>80 & 1h>80（方向由 SRSI 极值自身给出）。
-    质量门任一不过即返回 None。"""
+def check_signal(s1, s1h, adx1h, atr_ratio, wick_ok_flag, dir1h, dir1d):
+    """主信号(1d+1h SRSI 极值) + 质量门(ADX/插针/ATR) + 结构方向同向过滤(2026-09-01 新增)。
+    多：1d<20 & 1h<20 且 1h与1d市场结构均为多头(HH/HL)
+    空：1d>80 & 1h>80 且 1h与1d市场结构均为空头(LH/LL)
+    方向由结构(HH/HL 上行=1 / LH/LL 下行=-1)给出，横盘(0)不计入任一方向。"""
     if not wick_ok_flag:
         return None
     if adx1h < ADX_THRESHOLD:
@@ -248,9 +250,11 @@ def check_signal(s1, s1h, adx1h, atr_ratio, wick_ok_flag):
     if atr_ratio < ATR_MIN_RATIO:
         return None
     if s1 < 20 and s1h < 20:
-        return "多"
+        if dir1h == 1 and dir1d == 1:
+            return "多"
     if s1 > 80 and s1h > 80:
-        return "空"
+        if dir1h == -1 and dir1d == -1:
+            return "空"
     return None
 
 def fmt_p(p, inst):
@@ -314,6 +318,8 @@ def main():
         lows1h = [c["l"] for c in c1h]
         highs4 = [c["h"] for c in c4h]
         lows4 = [c["l"] for c in c4h]
+        highs1d = [c["h"] for c in c1d]
+        lows1d = [c["l"] for c in c1d]
         kv1 = calc_stoch_rsi_series(closes1)
         kv1h = calc_stoch_rsi_series(closes1h)
         kv4 = calc_stoch_rsi_series(closes4)
@@ -331,16 +337,17 @@ def main():
             continue
         atr_ratio = atr1h / closes1h[-1] if closes1h[-1] > 0 else 0.0
         wflag = wick_ok(highs1h, lows1h, opens1h, closes1h)
-        # 结构方向（仅展示参考，不再作为信号条件）
+        # 结构方向：1h/1d 作信号同向过滤（2026-09-01 新增），4h 仅展示参考
         d1h = structure_dir(highs1h, lows1h, min_pct=MIN_SWING_PCT_1H)
         d4h = structure_dir(highs4, lows4, min_pct=MIN_SWING_PCT_4H)
-        dirn = check_signal(s1, s1h, adx1h, atr_ratio, wflag)
+        d1d = structure_dir(highs1d, lows1d, min_pct=MIN_SWING_PCT_1D)
+        dirn = check_signal(s1, s1h, adx1h, atr_ratio, wflag, d1h, d1d)
         if dirn is None:
             continue
         cands.append({
             "name": name, "dir": dirn,
             "s1": round(s1, 1), "s1h": round(s1h, 1), "s4": round(s4, 1),
-            "d1h": d1h, "d4h": d4h,
+            "d1h": d1h, "d4h": d4h, "d1d": d1d,
             "adx": round(adx1h, 1), "atrr": atr_ratio,
             "price": closes1[-1],
         })
@@ -369,18 +376,18 @@ def main():
     if new_cands:
         print(f"\nNEW SIGNALS({len(new_cands)}):")
         for r in new_cands:
-            print(f"  {r['name']}{r['dir']} SRSI(1d/1h/4h)={r['s1']}/{r['s1h']}/{r['s4']} ADX(1h)={r['adx']:.0f} ATR/价={r['atrr']*100:.2f}% 结构(1h/4h)={r['d1h']}/{r['d4h']} price={r['price']}")
+            print(f"  {r['name']}{r['dir']} SRSI(1d/1h/4h)={r['s1']}/{r['s1h']}/{r['s4']} ADX(1h)={r['adx']:.0f} ATR/价={r['atrr']*100:.2f}% 结构(1h/1d)={r['d1h']}/{r['d1d']} price={r['price']}")
 
     if token and new_cands:
-        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'
+        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
         h += '<h3 style="margin:0 0 6px">SRSI 双周期极值 + 质量门 (TrendWatch)</h3>'
-        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&lt;20 &amp; 1h&lt;20 ｜ 空:1d&gt;80 &amp; 1h&gt;80 ｜ 质量门:1h ADX&gt;{ADX_THRESHOLD} &amp; 无极端插针 &amp; ATR/价&gt;{ATR_MIN_RATIO*100:.1f}%　共 {len(new_cands)} 个</div>'
+        h += f'<div style="font-size:11px;color:#666;margin-bottom:6px">多:1d&amp;1h SRSI&lt;20 且 1h/1d 结构同向多头 ｜ 空:1d&amp;1h SRSI&gt;80 且 1h/1d 结构同向空头 ｜ 质量门:1h ADX&gt;{ADX_THRESHOLD} &amp; 无极端插针 &amp; ATR/价&gt;{ATR_MIN_RATIO*100:.1f}%　共 {len(new_cands)} 个</div>'
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
             p = fmt_p(r["price"], f"{r['name']}-USDT-SWAP")
             h += f'<div style="margin:5px 0;padding:6px;background:#fff;border-left:3px solid {color}">'
             h += f'<b>{r["name"]}</b> <span style="color:{color}">{r["dir"]}</span> {p}<br>'
-            h += f'<span style="font-size:11px;color:#333">SRSI(1d/1h/4h)={r["s1"]}/{r["s1h"]}/{r["s4"]} | ADX(1h)={r["adx"]:.0f} | ATR/价={r["atrr"]*100:.2f}% | 结构(1h/4h)={r["d1h"]}/{r["d4h"]}</span>'
+            h += f'<span style="font-size:11px;color:#333">SRSI(1d/1h/4h)={r["s1"]}/{r["s1h"]}/{r["s4"]} | ADX(1h)={r["adx"]:.0f} | ATR/价={r["atrr"]*100:.2f}% | 结构(1h/1d)={r["d1h"]}/{r["d1d"]}</span>'
             h += '</div>'
         h += '</div>'
         pl = {"token": token, "title": "TrendWatch", "content": h, "template": "html"}
