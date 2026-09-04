@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 # TrendWatch 配置与数据层（2026-09-04 从 scan_trend.py 拆分，逻辑未改）
 import requests, time, os, json
 from datetime import datetime, timezone, timedelta
@@ -11,6 +11,8 @@ SWING_P = 5  # swing 判定左右窗口（根）
 MIN_SWING_PCT_1H = 0.005  # 1h 结构最小摆幅（相对价格，0.5%）——过滤噪声小波动（2026-09-01 由 0.3% 收紧至 0.5%）
 MIN_SWING_PCT_4H = 0.005  # 4h 结构最小摆幅（相对价格，0.5%）——过滤噪声小波动
 MIN_SWING_PCT_1D = 0.01   # 1d 结构最小摆幅（相对价格，1%）——日线级，过滤噪声（2026-09-01 新增方向过滤用）
+MIN_SWING_PCT_15M = 0.003 # 15m 结构最小摆幅（相对价格，0.3%）——15m 同方向共振过滤用（2026-09-05 新增）
+TOP_N = 10                # 每日最多推送前 N 个（按信号极端度排序取最强），降低噪音（2026-09-05 新增）
 
 # ---- SRSI 极值区（2026-09-02 改版：类型1 只看 1h，类型2 只看 1d）----
 SRSI_LOW = 20             # SRSI 低于此值为超卖
@@ -64,7 +66,7 @@ def cst_date():
 
 
 def load_pushed():
-    """读取今天已推送过的信号键集合（仅保留当天键，跨天自动重置）"""
+    """读取今天已推送过的币种集合（仅保留当天键，跨天自动重置）"""
     today = cst_date()
     if os.path.exists(STATE_FILE):
         try:

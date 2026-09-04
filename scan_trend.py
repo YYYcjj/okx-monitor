@@ -17,6 +17,9 @@ TrendWatch —— 两类信号扫描（2026-09-02 改版）
           最近 CONFIRM_MAX_BARS_1H 根内收盘站上(多)/跌破(空)该位才算确认
 
 质量门（共用）：1h ADX>20、ATR/价>0.5%
+共振门（2026-09-05 新增）：15m 结构方向须与信号方向一致（多=HH/HL，空=LH/LL），
+    确保入场时更低周期已转向/恢复趋势，过滤逆小周期的逆势噪音信号
+推送上限（2026-09-05 新增）：每日最多推送前 TOP_N 个（按信号极端度排序，默认 10），降低噪音
 插针门（分开）：回调类 WICK_AVG_MAX=6.0 / WICK_SPIKE_MAX=10.0
               反转类 WICK_AVG_MAX_REV=10.0 / WICK_SPIKE_MAX_REV=16.0
               —— 反转行情由剧烈波动构成，长影线是常态，沿用严阈值会误杀典型反转（2026-09-02）
@@ -104,10 +107,20 @@ def main():
         if res is None:
             continue
         kind, dirn, extra = res
+        # 15m 同方向共振（2026-09-05 新增）：信号方向须与 15m 结构方向一致。
+        # 回调=15m 已恢复趋势方向（入场顺势）；反转=15m 已转向（与 1h CHoCH 一致）。
+        # 不一致(含 15m 横盘 d15m=0)则跳过，过滤逆小周期的逆势噪音信号。
+        c15 = get_candles(s, "15m", 100)
+        if not c15:
+            continue
+        d15m = structure_dir([c["h"] for c in c15], [c["l"] for c in c15],
+                             min_pct=MIN_SWING_PCT_15M)
+        if d15m != (1 if dirn == "多" else -1):
+            continue
         cands.append({
             "name": name, "kind": kind, "dir": dirn,
             "s1": round(s1, 1), "s1h": round(s1h, 1), "s4": round(s4, 1),
-            "d1h": d1h, "d4h": d4h, "d1d": d1d,
+            "d1h": d1h, "d4h": d4h, "d1d": d1d, "d15m": d15m,
             "adx": round(adx1h, 1), "atrr": atr_ratio,
             "price": closes1[-1],
             "break_lvl": extra.get("break_lvl"),
@@ -140,13 +153,16 @@ def main():
         v = x["s1h"] if x["kind"] == "回调" else x["s1"]   # 回调看 1h，反转看 1d
         return (k, base, v if x["dir"] == "多" else -v)
     new_cands.sort(key=_sort_key)
+    if len(new_cands) > TOP_N:
+        print(f"Cap to top {TOP_N} (from {len(new_cands)}).")
+        new_cands = new_cands[:TOP_N]
 
     if new_cands:
         print(f"\nNEW SIGNALS({len(new_cands)}):")
         for r in new_cands:
             line = (f"  [{r['kind']}] {r['name']} {r['dir']} "
                     f"SRSI(1d/1h/4h)={r['s1']}/{r['s1h']}/{r['s4']} ADX(1h)={r['adx']:.0f} "
-                    f"ATR/价={r['atrr']*100:.2f}% 结构(4h/1d)={r['d4h']}/{r['d1d']} price={r['price']}")
+                    f"ATR/价={r['atrr']*100:.2f}% 结构(4h/1d/15m)={r['d4h']}/{r['d1d']}/{r['d15m']} price={r['price']}")
             if r["tgt"] is not None and r["space_pct"] is not None:
                 if r["space_pct"] >= 0:
                     line += f" | 目标={r['tgt']} 空间=+{r['space_pct']:.1f}%"
@@ -160,12 +176,12 @@ def main():
             print(line)
 
     if token and new_cands:
-        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">'
+        h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
         h += '<h3 style="margin:0 0 6px">TrendWatch（回调 / 反转）</h3>'
         h += (f'<div style="font-size:11px;color:#666;margin-bottom:6px">回调：1h SRSI 极值 + 4h/1d 结构同向 ｜ '
               f'反转：1d SRSI 同向极端 + 贴近日线关键位 + 1h 突破确认 ｜ '
-              f'质量门：1h ADX&gt;{ADX_THRESHOLD} &amp; ATR/价&gt;{ATR_MIN_RATIO*100:.1f}% &amp; 插针门（回调严/反转宽）　'
-              f'共 {len(new_cands)} 个</div>')
+              f'质量门：1h ADX&gt;{ADX_THRESHOLD} &amp; ATR/价&gt;{ATR_MIN_RATIO*100:.1f}% &amp; 插针门（回调严/反转宽）&amp; 15m 共振 ｜ '
+              f'每日前 {TOP_N} 个　共 {len(new_cands)} 个</div>')
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
             kcolor = "#185fa5" if r["kind"] == "回调" else "#b8860b"
@@ -175,7 +191,7 @@ def main():
             h += (f'<b>{r["name"]}</b> <span style="color:{kcolor}">[{r["kind"]}]</span> '
                   f'<span style="color:{color}">{r["dir"]}</span> {p}<br>')
             h += (f'<span style="font-size:11px;color:#333">SRSI(1d/1h/4h)={r["s1"]}/{r["s1h"]}/{r["s4"]} | '
-                  f'ADX(1h)={r["adx"]:.0f} | ATR/价={r["atrr"]*100:.2f}% | 结构(4h/1d)={r["d4h"]}/{r["d1d"]}</span>')
+                  f'ADX(1h)={r["adx"]:.0f} | ATR/价={r["atrr"]*100:.2f}% | 结构(4h/1d/15m)={r["d4h"]}/{r["d1d"]}/{r["d15m"]}</span>')
             if r["tgt"] is not None and r["space_pct"] is not None:
                 if r["space_pct"] >= 0:
                     seg = (f'<br><span style="font-size:11px;color:#333">目标 {fmt_p(r["tgt"], inst)}'
