@@ -17,9 +17,9 @@ TrendWatch —— 两类信号扫描（2026-09-02 改版）
           最近 CONFIRM_MAX_BARS_1H 根内收盘站上(多)/跌破(空)该位才算确认
 
 质量门（共用）：1h ADX>20、ATR/价>0.5%
-共振门（2026-09-05 新增）：15m 结构方向须与信号方向一致（多=HH/HL，空=LH/LL），
-    确保入场时更低周期已转向/恢复趋势，过滤逆小周期的逆势噪音信号
-推送上限（2026-09-05 新增）：每日最多推送前 TOP_N 个（按信号极端度排序，默认 10），降低噪音
+15m 共振（2026-09-05 改为标注而非过滤）：15m 结构方向与信号方向一致（多=HH/HL，空=LH/LL）时
+    标记为「推荐」，帮助优先关注顺势/已转向入场信号；不再作为过滤门槛，避免误杀信号。
+推送上限（2026-09-05 新增）：每日最多推送前 TOP_N 个（按信号极端度排序、推荐优先，默认 10），降低噪音
 插针门（分开）：回调类 WICK_AVG_MAX=6.0 / WICK_SPIKE_MAX=10.0
               反转类 WICK_AVG_MAX_REV=10.0 / WICK_SPIKE_MAX_REV=16.0
               —— 反转行情由剧烈波动构成，长影线是常态，沿用严阈值会误杀典型反转（2026-09-02）
@@ -37,7 +37,7 @@ from tw_calc import *
 
 def main():
     EXCL = ["BRL", "EUR", "TRY", "DAI", "USDC", "RUB"]
-    r = requests.get(f"{OKX}/api/v5/market/tickers", params={"instType": "SWAP"}, timeout=15)
+    r = requests.get(f"{OKX}/api/v5/market/candles", params={"instType": "SWAP"}, timeout=15)
     d = r.json()
     if d.get("code") != "0":
         print("Failed:", d); return
@@ -107,20 +107,18 @@ def main():
         if res is None:
             continue
         kind, dirn, extra = res
-        # 15m 同方向共振（2026-09-05 新增）：信号方向须与 15m 结构方向一致。
-        # 回调=15m 已恢复趋势方向（入场顺势）；反转=15m 已转向（与 1h CHoCH 一致）。
-        # 不一致(含 15m 横盘 d15m=0)则跳过，过滤逆小周期的逆势噪音信号。
+        # 15m 共振（2026-09-05 改为标注，不再作为过滤门槛）：仅算 15m 结构方向，
+        # 与信号同向(多=HH/HL，空=LH/LL)则标记 rec=True（推荐），不反向即放行。
         c15 = get_candles(s, "15m", 100)
-        if not c15:
-            continue
-        d15m = structure_dir([c["h"] for c in c15], [c["l"] for c in c15],
-                             min_pct=MIN_SWING_PCT_15M)
-        if d15m != (1 if dirn == "多" else -1):
-            continue
+        d15m = 0
+        if c15:
+            d15m = structure_dir([c["h"] for c in c15], [c["l"] for c in c15],
+                                 min_pct=MIN_SWING_PCT_15M)
+        rec = (d15m == (1 if dirn == "多" else -1))
         cands.append({
             "name": name, "kind": kind, "dir": dirn,
             "s1": round(s1, 1), "s1h": round(s1h, 1), "s4": round(s4, 1),
-            "d1h": d1h, "d4h": d4h, "d1d": d1d, "d15m": d15m,
+            "d1h": d1h, "d4h": d4h, "d1d": d1d, "d15m": d15m, "rec": rec,
             "adx": round(adx1h, 1), "atrr": atr_ratio,
             "price": closes1[-1],
             "break_lvl": extra.get("break_lvl"),
@@ -146,12 +144,13 @@ def main():
     if cands and not new_cands:
         print(f"All {len(cands)} signal(s) already pushed today, skip.")
 
-    # 排序：回调在前、反转在后；组内多在前、空在后；再按主信号 SRSI 排（越极端越靠前）
+    # 排序：回调在前、反转在后；组内多在前、空在后；同组内「推荐」优先；再按主信号 SRSI 排（越极端越靠前）
     def _sort_key(x):
         k = 0 if x["kind"] == "回调" else 1
         base = 0 if x["dir"] == "多" else 1
+        rec = 0 if x["rec"] else 1
         v = x["s1h"] if x["kind"] == "回调" else x["s1"]   # 回调看 1h，反转看 1d
-        return (k, base, v if x["dir"] == "多" else -v)
+        return (k, base, rec, v if x["dir"] == "多" else -v)
     new_cands.sort(key=_sort_key)
     if len(new_cands) > TOP_N:
         print(f"Cap to top {TOP_N} (from {len(new_cands)}).")
@@ -160,7 +159,8 @@ def main():
     if new_cands:
         print(f"\nNEW SIGNALS({len(new_cands)}):")
         for r in new_cands:
-            line = (f"  [{r['kind']}] {r['name']} {r['dir']} "
+            rec_tag = " [推荐]" if r["rec"] else ""
+            line = (f"  [{r['kind']}]{rec_tag} {r['name']} {r['dir']} "
                     f"SRSI(1d/1h/4h)={r['s1']}/{r['s1h']}/{r['s4']} ADX(1h)={r['adx']:.0f} "
                     f"ATR/价={r['atrr']*100:.2f}% 结构(4h/1d/15m)={r['d4h']}/{r['d1d']}/{r['d15m']} price={r['price']}")
             if r["tgt"] is not None and r["space_pct"] is not None:
@@ -180,15 +180,20 @@ def main():
         h += '<h3 style="margin:0 0 6px">TrendWatch（回调 / 反转）</h3>'
         h += (f'<div style="font-size:11px;color:#666;margin-bottom:6px">回调：1h SRSI 极值 + 4h/1d 结构同向 ｜ '
               f'反转：1d SRSI 同向极端 + 贴近日线关键位 + 1h 突破确认 ｜ '
-              f'质量门：1h ADX&gt;{ADX_THRESHOLD} &amp; ATR/价&gt;{ATR_MIN_RATIO*100:.1f}% &amp; 插针门（回调严/反转宽）&amp; 15m 共振 ｜ '
+              f'质量门：1h ADX&gt;{ADX_THRESHOLD} &amp; ATR/价&gt;{ATR_MIN_RATIO*100:.1f}% &amp; 插针门（回调严/反转宽）&amp; 15m 共振标注推荐 ｜ '
               f'每日前 {TOP_N} 个　共 {len(new_cands)} 个</div>')
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
             kcolor = "#185fa5" if r["kind"] == "回调" else "#b8860b"
             inst = f"{r['name']}-USDT-SWAP"
             p = fmt_p(r["price"], inst)
-            h += f'<div style="margin:5px 0;padding:6px;background:#fff;border-left:3px solid {color}">'
-            h += (f'<b>{r["name"]}</b> <span style="color:{kcolor}">[{r["kind"]}]</span> '
+            # 推荐：加金色左边框 + 浅金底 + 「★推荐」徽标，突出显示
+            border = "#d4a017" if r["rec"] else color
+            bg = "#fffdf2" if r["rec"] else "#fff"
+            rec_badge = (' <span style="background:#d4a017;color:#fff;font-size:10px;'
+                         'padding:1px 4px;border-radius:3px;font-weight:bold">★推荐</span>') if r["rec"] else ""
+            h += f'<div style="margin:5px 0;padding:6px;background:{bg};border-left:3px solid {border}">'
+            h += (f'<b>{r["name"]}</b>{rec_badge} <span style="color:{kcolor}">[{r["kind"]}]</span> '
                   f'<span style="color:{color}">{r["dir"]}</span> {p}<br>')
             h += (f'<span style="font-size:11px;color:#333">SRSI(1d/1h/4h)={r["s1"]}/{r["s1h"]}/{r["s4"]} | '
                   f'ADX(1h)={r["adx"]:.0f} | ATR/价={r["atrr"]*100:.2f}% | 结构(4h/1d/15m)={r["d4h"]}/{r["d1d"]}/{r["d15m"]}</span>')
