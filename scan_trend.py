@@ -37,7 +37,7 @@ from tw_calc import *
 
 def main():
     EXCL = ["BRL", "EUR", "TRY", "DAI", "USDC", "RUB"]
-    r = requests.get(f"{OKX}/api/v5/market/candles", params={"instType": "SWAP"}, timeout=15)
+    r = requests.get(f"{OKX}/api/v5/market/tickers", params={"instType": "SWAP"}, timeout=15)
     d = r.json()
     if d.get("code") != "0":
         print("Failed:", d); return
