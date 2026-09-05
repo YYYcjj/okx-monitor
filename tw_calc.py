@@ -136,7 +136,8 @@ def structure_dir(highs, lows, p=SWING_P, min_pct=0.003):
     """市场结构方向（HH/HL/LH/LL），带最小摆幅过滤：
     上行(1) = 最近两个 swing high 走高(HH) 且 最近两个 swing low 走高(HL)，且两组差值均 > min_pct*价格量级
     下行(-1)= 最近两个 swing high 走低(LH) 且 最近两个 swing low 走低(LL)，且两组差值均 > min_pct*价格量级
-    否则(结构混合/样本不足/摆幅不足) = 0（横盘，不计入方向）"""
+    否则(结构混合/样本不足/摆幅不足) = 0（横盘，不计入方向）
+    注：2026-09-05 起作为信号条件（1h/1d 必须共振同向）。"""
     sh, sl = find_swings(highs, lows, p)
     if len(sh) < 2 or len(sl) < 2:
         return 0
@@ -153,7 +154,7 @@ def structure_dir(highs, lows, p=SWING_P, min_pct=0.003):
 
 def near_key_level(price, levels, pct=NEAR_LEVEL_PCT):
     """价格是否贴近日线关键位：与任一 swing 高低点的相对距离 <= pct。
-    用于类型2 判断「遇到阻力/支撑」——反转不能发生在半空中。"""
+    用于顺势信号判断「处于关键位置」（做多传 swing low、做空传 swing high）。"""
     if price <= 0:
         return False
     for lv in levels:
@@ -162,109 +163,65 @@ def near_key_level(price, levels, pct=NEAR_LEVEL_PCT):
     return False
 
 
-def confirm_1h(highs, lows, closes, direction, p=CONFIRM_SWING_P,
-               lookback=CONFIRM_LOOKBACK, max_bars=CONFIRM_MAX_BARS_1H):
-    """类型2 的 1h 确认（CHoCH，Change of Character）：
-    做多(direction=1)：在最近 lookback 根里取「最低点」作为本段起点，再取该点之后形成的
-        最后一个 1h 反弹高点（LH）；某根 K 线收盘价站上它 = 第一个 Higher High，
-        1h 下跌结构被打断 —— 这是客观事实，可回测。
-    做空(direction=-1)：镜像，取最近最高点之后的最后一个回踩低点（HL），收盘跌破 = 第一个 Lower Low。
-    注意：swing 必须用小窗口 p=2，否则「最新一次反弹高点」会因左右窗口未闭合而识别不到；
-        也不能用「自低点以来的最高点」当突破位，那会让单调上涨中的每一根都算突破。
-    返回 (是否确认, 突破位, 发生在几根前)；0 = 刚刚那根突破；未确认为 (False, 参考位, None)。"""
-    n = len(closes)
-    start = max(0, n - lookback)
-    if direction == 1:
-        seg = lows[start:]
-        if not seg:
-            return (False, None, None)
-        base_i = start + seg.index(min(seg))
-    else:
-        seg = highs[start:]
-        if not seg:
-            return (False, None, None)
-        base_i = start + seg.index(max(seg))
-    if base_i >= n - 2:
-        return (False, None, None)
-
-    sh, sl = find_swings(highs, lows, p=p)
-    if direction == 1:
-        cands = [(i, v) for i, v in sh if i > base_i]
-    else:
-        cands = [(i, v) for i, v in sl if i > base_i]
-    if not cands:
-        return (False, None, None)
-    lvl_i, lvl = cands[-1]
-
-    for k in range(max_bars):
-        i = n - 1 - k
-        if i <= lvl_i or i < 1:
-            break
-        cur, prev = closes[i], closes[i - 1]
-        if direction == 1 and cur > lvl and prev <= lvl:
-            return (True, lvl, k)
-        if direction == -1 and cur < lvl and prev >= lvl:
-            return (True, lvl, k)
-    return (False, lvl, None)
-
-
-def classify(s1, s1h, adx1h, atr_ratio, wick_ok_flag, wick_ok_rev, d4h, d1d,
-             price, sh1d, sl1d, highs1h, lows1h, closes1h):
-    """两类信号判定（2026-09-02 改版），返回 (类型, 方向, 附加信息dict) 或 None。
-    类型1 回调：1h SRSI 极值 + 4h/1d 结构同向 + 1d SRSI 不在反向极端
-    类型2 反转：1d SRSI 处于同方向极端 + 贴近日线关键位 + 1h CHoCH 突破确认
-    共用质量门：1h ADX>20、ATR/价>ATR_MIN_RATIO。
-    插针门分开用：回调用 wick_ok_flag，反转用 wick_ok_rev（阈值已放宽）。
-    注：目标位与空间只做展示、不参与过滤 —— 值不值得做由人判断（2026-09-02 用户定）。"""
+def classify(s1, s1h, adx1h, atr_ratio, wick_ok_flag, d1h, d1d, price, sh1d, sl1d):
+    """统一顺势信号（2026-09-05 改版）：
+    核心：1日线关键位置 + 1h 与 1d 共振(方向相同) + SRSI 同向。
+    两类触发（方向均由 1h/1d 共振决定）：
+      回调：1d SRSI 极端（1d 多结构+SRSI<20→多；1d 空结构+SRSI>80→空）
+      趋势：1h SRSI 极端（1h 多结构+SRSI<20→多；1h 空结构+SRSI>80→空）
+    共用要求（不满足即剔除）：
+      - 1d 结构方向 == 1h 结构方向 == 信号方向（共振同向，横盘 0 淘汰）
+      - 价格贴近日线关键位（做多近 swing low 支撑；做空近 swing high 阻力，NEAR_LEVEL_PCT 内）
+      - 1h ADX>20、ATR/价 在 (ATR_MIN_RATIO, ATR_MAX_RATIO)
+      - 插针门（wick_ok_flag）
+    保险：非触发侧 SRSI 不在反向极端（做多时 1h/1d 均不>80；做空时均不<20）
+    目标位仅展示、不参与过滤（用户定）。
+    返回 (类型, 方向, 附加信息dict) 或 None。"""
     if adx1h < ADX_THRESHOLD:
         return None
-    if atr_ratio < ATR_MIN_RATIO:
+    if not (ATR_MIN_RATIO < atr_ratio < ATR_MAX_RATIO):
+        return None
+    # 1h 与 1d 必须共振同向（横盘 0 视为不共振，淘汰）
+    if d1h != d1d or d1d == 0:
+        return None
+    dirn = d1d  # 信号方向 = 结构方向（1h/1d 已一致）
+
+    # 关键位置：做多贴近日线 swing low（支撑），做空贴近日线 swing high（阻力）
+    if dirn == 1:
+        if not near_key_level(price, [p for _, p in sl1d[-2:]]):
+            return None
+    else:
+        if not near_key_level(price, [p for _, p in sh1d[-2:]]):
+            return None
+
+    if not wick_ok_flag:
         return None
 
-    levels_1d = [p for _, p in sh1d[-2:]] + [p for _, p in sl1d[-2:]]
-
-    def _mk(kind, dirn, target):
+    def _mk(kind, dn, target):
         """统一附带目标位 / 空间百分比 / 空间相当于几倍 ATR（仅展示）"""
-        info = {"tgt": target, "break_lvl": None, "ago": None,
-                "space_pct": None, "space_atr": None}
+        info = {"tgt": target, "space_pct": None, "space_atr": None}
         if target and price > 0:
             # 按交易方向取符号：多=(目标-现价)/现价，空=(现价-目标)/现价
-            # 正数 = 还有空间；负数 = 目标已被越过（做多已站上前高 / 做空已跌破前低）
-            sp = (target - price) / price if dirn == "多" else (price - target) / price
+            sp = (target - price) / price if dn == "多" else (price - target) / price
             info["space_pct"] = sp * 100.0
             info["space_atr"] = sp / atr_ratio if atr_ratio > 0 else None
-        return (kind, dirn, info)
+        return (kind, dn, info)
 
-    # ---- 类型1：趋势回调（顺势中继）----
-    if s1h < SRSI_LOW and d4h == 1 and d1d == 1 and s1 <= SRSI_HIGH:
-        if not wick_ok_flag:
+    # SRSI 同向：任一侧极端即触发；另一侧不能反向极端（保险）
+    if dirn == 1:
+        triggered = (s1 < SRSI_LOW) or (s1h < SRSI_LOW)
+        reverse = (s1 > SRSI_HIGH) or (s1h > SRSI_HIGH)
+        if not triggered or reverse:
             return None
-        return _mk("回调", "多", sh1d[-1][1] if sh1d else None)
-    if s1h > SRSI_HIGH and d4h == -1 and d1d == -1 and s1 >= SRSI_LOW:
-        if not wick_ok_flag:
+        kind = "回调" if s1 < SRSI_LOW else "趋势"
+        return _mk(kind, "多", sh1d[-1][1] if sh1d else None)
+    else:  # dirn == -1
+        triggered = (s1 > SRSI_HIGH) or (s1h > SRSI_HIGH)
+        reverse = (s1 < SRSI_LOW) or (s1h < SRSI_LOW)
+        if not triggered or reverse:
             return None
-        return _mk("回调", "空", sl1d[-1][1] if sl1d else None)
-
-    # ---- 类型2：反转（逆势，必须 1h 确认；插针门用放宽后的阈值）----
-    if d1d == -1 and s1 < SRSI_LOW and near_key_level(price, levels_1d):
-        if not wick_ok_rev:
-            return None
-        ok, lvl, ago = confirm_1h(highs1h, lows1h, closes1h, 1)
-        if ok:
-            r = _mk("反转", "多", sh1d[-1][1] if sh1d else None)  # 目标 = 日线最近的 LH
-            r[2]["break_lvl"] = lvl
-            r[2]["ago"] = ago
-            return r
-    if d1d == 1 and s1 > SRSI_HIGH and near_key_level(price, levels_1d):
-        if not wick_ok_rev:
-            return None
-        ok, lvl, ago = confirm_1h(highs1h, lows1h, closes1h, -1)
-        if ok:
-            r = _mk("反转", "空", sl1d[-1][1] if sl1d else None)  # 目标 = 日线最近的 HL
-            r[2]["break_lvl"] = lvl
-            r[2]["ago"] = ago
-            return r
-    return None
+        kind = "回调" if s1 > SRSI_HIGH else "趋势"
+        return _mk(kind, "空", sl1d[-1][1] if sl1d else None)
 
 
 def fmt_p(p, inst):
