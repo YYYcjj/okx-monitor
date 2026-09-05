@@ -11,13 +11,15 @@ TrendWatch —— 统一顺势信号扫描（2026-09-05 改版）
     趋势：1h SRSI 极端（1h 多结构+SRSI<20→多；1h 空结构+SRSI>80→空）
 共用要求（不满足即剔除）：
     - 1h 结构方向 == 1d 结构方向 == 信号方向（共振同向，横盘 0 淘汰）
-    - 价格贴近日线关键位（做多近 swing low 支撑；做空近 swing high 阻力，NEAR_LEVEL_PCT 内）
+    - 价格贴近日线关键位且【未破位】（做多价在 swing low 上方、做空价在 swing high 下方，NEAR_LEVEL_PCT 内）
     - 1h ADX>20、ATR/价 在 (0.5%, 2%)
     - 插针门（WICK_AVG_MAX / WICK_SPIKE_MAX）
 保险：非触发侧 SRSI 不在反向极端（做多时 1h/1d 均不>80；做空时均不<20）
+拐头确认（补漏②）：触发侧 SRSI 需从极值区回升——做多当前值>前一根、做空当前值<前一根，剔除仍在加速赶底/赶顶的接飞刀情形。
+空间硬门（补漏③）：目标位空间 >=3% 或 >=1.5×ATR 才通过（不足/已越过均剔除）。
 15m 共振：仅标注「★推荐」（15m 结构与信号同向），不再过滤，帮助优先关注。
 推送上限：每日最多前 TOP_N 个（回调优先于趋势、多优先于空、推荐优先、SRSI 越极端越靠前）。
-目标位与空间：做多取日线最近 swing high、做空取最近 swing low，仅展示、不参与过滤。
+目标位与空间：做多取日线最近 swing high、做空取最近 swing low，达标后仅展示空间。
 
 扫描池：成交量前 100 的 USDT 永续合约。
 去重：同一 CST 日期内同一「币种 + 类型 + 方向」只推送一次（状态存于 pushed_state.json）。
@@ -71,6 +73,9 @@ def main():
         s1h = srsi_last(kv1h)
         if s1 is None or s1h is None:
             continue
+        # SRSI 前一根值（拐头确认用，补漏②）：做多需从极值回升、做空需从极值回落
+        s1p = kv1[-2] if len(kv1) >= 2 else None
+        s1hp = kv1h[-2] if len(kv1h) >= 2 else None
         # 质量门指标（1h）
         atr1h = calc_atr(highs1h, lows1h, closes1h)
         adx1h = calc_adx(highs1h, lows1h, closes1h)
@@ -83,7 +88,7 @@ def main():
         d1d = structure_dir(highs1d, lows1d, min_pct=MIN_SWING_PCT_1D)
         # 日线 swing 点：关键位与参考目标
         sh1d, sl1d = find_swings(highs1d, lows1d, p=SWING_P)
-        res = classify(s1, s1h, adx1h, atr_ratio, wflag, d1h, d1d,
+        res = classify(s1, s1h, s1p, s1hp, adx1h, atr_ratio, wflag, d1h, d1d,
                        closes1[-1], sh1d, sl1d)
         if res is None:
             continue
@@ -155,9 +160,9 @@ def main():
         h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
         h += '<h3 style="margin:0 0 6px">TrendWatch（回调 / 趋势）</h3>'
         h += (f'<div style="font-size:11px;color:#666;margin-bottom:6px">'
-              f'1h 与 1d 共振同向 + SRSI 同向 + 贴近日线关键位 ｜ '
+              f'1h/1d 共振同向 + SRSI 同向拐头 + 日线关键位未破 ｜ '
               f'回调：1d SRSI 极端触发 ｜ 趋势：1h SRSI 极端触发 ｜ '
-              f'质量门：1h ADX&gt;{ADX_THRESHOLD} &amp; ATR/价 {ATR_MIN_RATIO*100:.1f}-{ATR_MAX_RATIO*100:.0f}% &amp; 插针门 &amp; 15m 共振标注推荐 ｜ '
+              f'质量门：ADX&gt;{ADX_THRESHOLD} &amp; ATR/价 {ATR_MIN_RATIO*100:.1f}-{ATR_MAX_RATIO*100:.0f}% &amp; 插针门 &amp; 空间≥{MIN_SPACE_ATR:g}×ATR/{MIN_SPACE_PCT:g}% ｜ '
               f'每日前 {TOP_N} 个　共 {len(new_cands)} 个</div>')
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
