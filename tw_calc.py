@@ -152,30 +152,59 @@ def structure_dir(highs, lows, p=SWING_P, min_pct=0.003):
     return 0
 
 
-def near_key_level(price, levels, pct=NEAR_LEVEL_PCT):
-    """价格是否贴近日线关键位：与任一 swing 高低点的相对距离 <= pct。
-    用于顺势信号判断「处于关键位置」（做多传 swing low、做空传 swing high）。"""
-    if price <= 0:
+def near_support_ok(price, lows, pct=NEAR_LEVEL_PCT):
+    """做多关键位检查：价格贴近日线 swing low 支撑且【未跌破】。
+    lows 为 swing low 价位列表(已解包)；取最近两道支撑中较高的一道(最新一道)，
+    要求 price 在其上方 0~pct 区间内——既在关键位附近，又未被收盘跌破
+    (破位=下方空间打开，不再叫回调到支撑)。2026-09-05 补漏①。"""
+    if price <= 0 or len(lows) < 2:
         return False
-    for lv in levels:
-        if lv and abs(price - lv) / price <= pct:
-            return True
-    return False
+    lv = max(lows[-2:])
+    return 0 < (price - lv) / price <= pct
 
 
-def classify(s1, s1h, adx1h, atr_ratio, wick_ok_flag, d1h, d1d, price, sh1d, sl1d):
-    """统一顺势信号（2026-09-05 改版）：
+def near_resistance_ok(price, highs, pct=NEAR_LEVEL_PCT):
+    """做空关键位检查：价格贴近日线 swing high 阻力且【未上破】。
+    highs 为 swing high 价位列表(已解包)；取最近两道阻力中较低的一道(最新一道)，
+    要求 price 在其下方 0~pct 区间内。"""
+    if price <= 0 or len(highs) < 2:
+        return False
+    lv = min(highs[-2:])
+    return 0 < (lv - price) / price <= pct
+
+
+def space_ok(info):
+    """目标空间硬门(补漏③)：有目标位、空间为正(未越过)，
+    且空间 >= MIN_SPACE_PCT% 或 >= MIN_SPACE_ATR×ATR，任一满足才通过。"""
+    tgt = info.get("tgt")
+    sp = info.get("space_pct")
+    sa = info.get("space_atr")
+    if tgt is None or sp is None or sp <= 0:
+        return False
+    if sa is not None and sa >= MIN_SPACE_ATR:
+        return True
+    return sp >= MIN_SPACE_PCT
+
+
+def classify(s1, s1h, s1p, s1hp, adx1h, atr_ratio, wick_ok_flag, d1h, d1d,
+             price, sh1d, sl1d):
+    """统一顺势信号（2026-09-05 改版 + 补漏 ①②③）：
     核心：1日线关键位置 + 1h 与 1d 共振(方向相同) + SRSI 同向。
     两类触发（方向均由 1h/1d 共振决定）：
       回调：1d SRSI 极端（1d 多结构+SRSI<20→多；1d 空结构+SRSI>80→空）
       趋势：1h SRSI 极端（1h 多结构+SRSI<20→多；1h 空结构+SRSI>80→空）
     共用要求（不满足即剔除）：
       - 1d 结构方向 == 1h 结构方向 == 信号方向（共振同向，横盘 0 淘汰）
-      - 价格贴近日线关键位（做多近 swing low 支撑；做空近 swing high 阻力，NEAR_LEVEL_PCT 内）
+      - 关键位置未破（补漏①）：做多贴近日线 swing low 且在其上方(未跌破)；
+        做空贴近日线 swing high 且在其下方(未上破)；NEAR_LEVEL_PCT 内
       - 1h ADX>20、ATR/价 在 (ATR_MIN_RATIO, ATR_MAX_RATIO)
       - 插针门（wick_ok_flag）
     保险：非触发侧 SRSI 不在反向极端（做多时 1h/1d 均不>80；做空时均不<20）
-    目标位仅展示、不参与过滤（用户定）。
+    SRSI 拐头确认（补漏②）：触发侧的 SRSI 需从极值区开始回升才有效——
+      做多要求当前值 > 前一根值(不再下探)，做空要求当前值 < 前一根值(不再上冲)，
+      剔除「仍在加速赶底/赶顶」的接飞刀情形。s1p/s1hp 为 1d/1h SRSI 前一根值。
+    空间硬门（补漏③）：目标位(做多=最近日线 swing high，做空=最近 swing low)的
+      空间 >= MIN_SPACE_PCT% 或 >= MIN_SPACE_ATR×ATR 才通过；目标被越过也剔除。
     返回 (类型, 方向, 附加信息dict) 或 None。"""
     if adx1h < ADX_THRESHOLD:
         return None
@@ -186,19 +215,19 @@ def classify(s1, s1h, adx1h, atr_ratio, wick_ok_flag, d1h, d1d, price, sh1d, sl1
         return None
     dirn = d1d  # 信号方向 = 结构方向（1h/1d 已一致）
 
-    # 关键位置：做多贴近日线 swing low（支撑），做空贴近日线 swing high（阻力）
+    # 关键位置（补漏①：必须未破位——做多价在支撑上方，做空价在阻力下方）
     if dirn == 1:
-        if not near_key_level(price, [p for _, p in sl1d[-2:]]):
+        if not near_support_ok(price, [p for _, p in sl1d[-2:]]):
             return None
     else:
-        if not near_key_level(price, [p for _, p in sh1d[-2:]]):
+        if not near_resistance_ok(price, [p for _, p in sh1d[-2:]]):
             return None
 
     if not wick_ok_flag:
         return None
 
     def _mk(kind, dn, target):
-        """统一附带目标位 / 空间百分比 / 空间相当于几倍 ATR（仅展示）"""
+        """统一附带目标位 / 空间百分比 / 空间相当于几倍 ATR"""
         info = {"tgt": target, "space_pct": None, "space_atr": None}
         if target and price > 0:
             # 按交易方向取符号：多=(目标-现价)/现价，空=(现价-目标)/现价
@@ -207,21 +236,37 @@ def classify(s1, s1h, adx1h, atr_ratio, wick_ok_flag, d1h, d1d, price, sh1d, sl1
             info["space_atr"] = sp / atr_ratio if atr_ratio > 0 else None
         return (kind, dn, info)
 
-    # SRSI 同向：任一侧极端即触发；另一侧不能反向极端（保险）
+    # SRSI 同向 + 拐头确认：触发侧极端 + 从极值回升；另一侧不得反向极端（保险）
     if dirn == 1:
         triggered = (s1 < SRSI_LOW) or (s1h < SRSI_LOW)
         reverse = (s1 > SRSI_HIGH) or (s1h > SRSI_HIGH)
         if not triggered or reverse:
             return None
-        kind = "回调" if s1 < SRSI_LOW else "趋势"
-        return _mk(kind, "多", sh1d[-1][1] if sh1d else None)
+        if s1 < SRSI_LOW:                      # 回调：看 1d 拐头
+            if s1p is None or not (s1 > s1p):  # 补漏②：1d 仍在探底 → 剔除
+                return None
+            kind = "回调"
+        else:                                   # 趋势：看 1h 拐头
+            if s1hp is None or not (s1h > s1hp):
+                return None
+            kind = "趋势"
+        res = _mk(kind, "多", sh1d[-1][1] if sh1d else None)
+        return res if space_ok(res[2]) else None   # 补漏③：空间硬门
     else:  # dirn == -1
         triggered = (s1 > SRSI_HIGH) or (s1h > SRSI_HIGH)
         reverse = (s1 < SRSI_LOW) or (s1h < SRSI_LOW)
         if not triggered or reverse:
             return None
-        kind = "回调" if s1 > SRSI_HIGH else "趋势"
-        return _mk(kind, "空", sl1d[-1][1] if sl1d else None)
+        if s1 > SRSI_HIGH:                      # 回调：看 1d 拐头(从超买回落)
+            if s1p is None or not (s1 < s1p):
+                return None
+            kind = "回调"
+        else:                                   # 趋势：看 1h 拐头
+            if s1hp is None or not (s1h < s1hp):
+                return None
+            kind = "趋势"
+        res = _mk(kind, "空", sl1d[-1][1] if sl1d else None)
+        return res if space_ok(res[2]) else None   # 补漏③：空间硬门
 
 
 def fmt_p(p, inst):
