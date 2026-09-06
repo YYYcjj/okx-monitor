@@ -1,12 +1,15 @@
 name: Watchlist Push
 
 on:
-  workflow_dispatch:   # 2026-09-06：A 主监控已停用自动触发，只保留 TrendWatch(每15min)。
+  schedule:
+    # 每天 08:00 / 16:00 CST → UTC 0,8 点（2026-09-06 降频为每天两次）
+    - cron: '0 0,8 * * *'
+  workflow_dispatch:
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 

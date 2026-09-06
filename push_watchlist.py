@@ -1,13 +1,64 @@
 #!/usr/bin/env python3
 """
-自选币种指标推送 (Watchlist)
-读取 FIXED_SYMBOLS.txt，推送每个自选币种的指标情况。
-指标：方向(1H/4H/1D) + SRSI(1H/4H/1D) + ADX(4H) + ATR(1H)%
+最近成交币种指标推送 (Watchlist)
+2026-09-06 起：币池自动更新为 OKX 近 7 天成交过的 USDT 永续币（orders-history 枚举，每天 08/16 点推送时实时拉取）；
+API 失败/为空时回退读取 FIXED_SYMBOLS.txt。
+推送每个币种的指标情况：方向(1H/4H/1D) + SRSI(1H/4H/1D) + ADX(4H) + ATR(1H)%
 """
 import requests, time, os
 from datetime import datetime, timezone, timedelta
 
 OKX = "https://www.okx.com"
+# OKX 私有 API 凭据（读成交记录枚举近7天成交币）：env 优先，缺省回退与 okx_monitor.py 一致的只读 Key
+OKX_API_KEY = os.environ.get("OKX_API_KEY", "6d758f5a-4ea7-44d1-bc56-5b8659263b1a")
+OKX_SECRET = os.environ.get("OKX_SECRET", "760BEBD659B861D17B5DE6DF7112E5CF")
+OKX_PASSPHRASE = os.environ.get("OKX_PASSPHRASE", "1qaz2wsxcJJ!")
+import hmac as _hmac, base64 as _b64, hashlib as _hashlib
+
+def _okx_sign(ts, method, path, body=""):
+    return _b64.b64encode(_hmac.new(OKX_SECRET.encode(), (ts+method+path+body).encode(), _hashlib.sha256).digest()).decode()
+
+def _okx_req(method, path, params=None):
+    ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    qs = "?" + "&".join(f"{k}={v}" for k, v in (params or {}).items()) if params else ""
+    h = {"OK-ACCESS-KEY": OKX_API_KEY, "OK-ACCESS-SIGN": _okx_sign(ts, method, path+qs),
+         "OK-ACCESS-TIMESTAMP": ts, "OK-ACCESS-PASSPHRASE": OKX_PASSPHRASE,
+         "Content-Type": "application/json"}
+    for _ in range(3):
+        try:
+            r = requests.get(f"{OKX}{path}{qs}", headers=h, timeout=15)
+            return r.json()
+        except Exception:
+            time.sleep(1)
+    return {}
+
+def fetch_recent_traded_symbols(days=7, max_pages=5):
+    """枚举 OKX 近 N 天成交过的 USDT 永续币种（orders-history 不带 instId，分页拉全）。
+    返回去重后的 instId 列表（如 ['ORDI-USDT-SWAP', ...]）；失败返回 []。"""
+    end_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+    begin_ts = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
+    syms = []
+    seen = set()
+    after = None
+    for _ in range(max_pages):
+        params = {"instType": "SWAP", "state": "filled",
+                  "begin": str(begin_ts), "end": str(end_ts), "limit": "100"}
+        if after:
+            params["after"] = str(after)
+        data = _okx_req("GET", "/api/v5/trade/orders-history", params)
+        if data.get("code") != "0" or not data.get("data"):
+            break
+        batch = data["data"]
+        for o in batch:
+            inst = o.get("instId", "")
+            if "USDT-SWAP" in inst and inst not in seen:
+                seen.add(inst)
+                syms.append(inst)
+        if len(batch) < 100:
+            break
+        after = batch[-1].get("ordId")
+        time.sleep(0.12)
+    return syms
 
 def get_candles(inst, bar, limit=100):
     for _ in range(3):
@@ -100,11 +151,18 @@ def scol(v):
 
 def main():
     proj=os.path.dirname(os.path.abspath(__file__))
-    fixed_file=os.path.join(proj,"FIXED_SYMBOLS.txt")
-    symbols=[]
-    if os.path.exists(fixed_file):
-        with open(fixed_file)as f:
-            symbols=[l.strip()for l in f if l.strip()and not l.startswith('#')]
+    # 币池（2026-09-06 起）= OKX 近 7 天成交过的 USDT 永续币（自动更新）；API 失败/为空时回退 FIXED_SYMBOLS.txt
+    symbols = fetch_recent_traded_symbols(days=7)
+    src = "近7天成交"
+    if not symbols:
+        fixed_file=os.path.join(proj,"FIXED_SYMBOLS.txt")
+        if os.path.exists(fixed_file):
+            with open(fixed_file)as f:
+                symbols=[l.strip()for l in f if l.strip()and not l.startswith('#')]
+        src = "FIXED自选(API失败回退)"
+    if len(symbols) > 50:
+        symbols = symbols[:50]  # 防币过多扫描超时，保留最近成交的前 50 个
+    print(f"Watchlist pool: {len(symbols)} symbols ({src})")
 
     now=datetime.now(timezone(timedelta(hours=8)))
     now_str=now.strftime("%m-%d %H:%M CST")
@@ -133,7 +191,7 @@ def main():
                      "atr":round(atr_pct,1)if atr_pct is not None else None})
 
     h='<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:520px">'
-    h+=f'<h3 style="margin:0 0 4px;color:#333">📊 自选币种指标</h3>'
+    h+=f'<h3 style="margin:0 0 4px;color:#333">📊 {"最近成交" if src=="近7天成交" else "自选"}币种指标</h3>'
     h+=f'<p style="color:#999;font-size:11px;margin:0 0 8px">{now_str}</p>'
     h+='<table style="width:100%;border-collapse:collapse;font-size:12px">'
     h+='<tr style="background:#f5f6fa;font-weight:bold;color:#666">'
