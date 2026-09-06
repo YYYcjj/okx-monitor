@@ -169,26 +169,43 @@ def main():
             kcolor = "#185fa5" if r["kind"] == "回调" else "#b8860b"
             inst = f"{r['name']}-USDT-SWAP"
             p = fmt_p(r["price"], inst)
+            dirmap = {1: "上行↑", -1: "下行↓", 0: "横盘"}
             # 推荐：加金色左边框 + 浅金底 + 「★推荐」徽标
             border = "#d4a017" if r["rec"] else color
             bg = "#fffdf2" if r["rec"] else "#fff"
             rec_badge = (' <span style="background:#d4a017;color:#fff;font-size:10px;'
                          'padding:1px 4px;border-radius:3px;font-weight:bold">★推荐</span>') if r["rec"] else ""
-            h += f'<div style="margin:5px 0;padding:6px;background:{bg};border-left:3px solid {border}">'
-            h += (f'<b>{r["name"]}</b>{rec_badge} <span style="color:{kcolor}">[{r["kind"]}]</span> '
-                  f'<span style="color:{color}">{r["dir"]}</span> {p}<br>')
-            h += (f'<span style="font-size:11px;color:#333">SRSI(1d/1h)={r["s1"]}/{r["s1h"]} | '
-                  f'ADX(1h)={r["adx"]:.0f} | ATR/价={r["atrr"]*100:.2f}% | 结构(1h/1d/15m)={r["d1h"]}/{r["d1d"]}/{r["d15m"]}</span>')
+            h += f'<div style="margin:5px 0;padding:7px 9px;background:{bg};border-left:3px solid {border};border-radius:0 6px 6px 0">'
+            # 第一行：币名 + 类型 + 方向 + 价格
+            h += (f'<div style="display:flex;align-items:baseline;gap:5px;flex-wrap:wrap;line-height:1.4">'
+                  f'<b style="font-size:14px">{r["name"]}</b>{rec_badge} '
+                  f'<span style="color:{kcolor};font-size:12px">[{r["kind"]}]</span> '
+                  f'<span style="color:{color};font-size:12px;font-weight:bold">{r["dir"]}</span> '
+                  f'<span style="font-size:11px;color:#666">{p}</span></div>')
+            # 第二行：SRSI（触发依据）
+            h += (f'<div style="font-size:12px;color:#333;margin-top:5px">SRSI '
+                  f'<b>1d {r["s1"]:.1f}</b> / <b>1h {r["s1h"]:.1f}</b></div>')
+            # 第三行：结构 + 方向（共振验证）
+            h += (f'<div style="font-size:12px;color:#333;margin-top:2px">结构 '
+                  f'1d <b>{dirmap.get(r["d1d"], r["d1d"])}</b> · '
+                  f'1h <b>{dirmap.get(r["d1h"], r["d1h"])}</b> · '
+                  f'15m <b>{dirmap.get(r["d15m"], r["d15m"])}</b> '
+                  f'｜ 方向 <b style="color:{color}">{r["dir"]}</b></div>')
+            # 第四行：ADX + ATR/价（质量门）
+            h += (f'<div style="font-size:12px;color:#333;margin-top:2px">'
+                  f'ADX(1h) <b>{r["adx"]:.0f}</b> ｜ ATR/价 <b>{r["atrr"]*100:.2f}%</b></div>')
+            # 分隔线 + 目标/空间
             if r["tgt"] is not None and r["space_pct"] is not None:
                 if r["space_pct"] >= 0:
-                    seg = (f'<br><span style="font-size:11px;color:#333">目标 {fmt_p(r["tgt"], inst)}'
-                           f'（空间 +{r["space_pct"]:.1f}%')
+                    seg = (f'<div style="font-size:12px;color:#333;margin-top:4px;'
+                           f'border-top:0.5px solid #ececec;padding-top:4px">目标 {fmt_p(r["tgt"], inst)}'
+                           f' · 空间 +{r["space_pct"]:.1f}%')
                     if r["space_atr"] is not None:
-                        seg += f'，{r["space_atr"]:.1f}×ATR'
-                    h += seg + '）</span>'
+                        seg += f'（{r["space_atr"]:.1f}×ATR）'
+                    h += seg + '</div>'
                 else:
-                    h += (f'<br><span style="font-size:11px;color:#a32d2d">目标 {fmt_p(r["tgt"], inst)}'
-                          f'（已越过 {abs(r["space_pct"]):.1f}%，目标位无效）</span>')
+                    h += (f'<div style="font-size:12px;color:#a32d2d;margin-top:4px">目标 {fmt_p(r["tgt"], inst)}'
+                          f'（已越过 {abs(r["space_pct"]):.1f}%，目标位无效）</div>')
             h += '</div>'
         h += '</div>'
         pl = {"token": token, "title": "TrendWatch", "content": h, "template": "html"}
