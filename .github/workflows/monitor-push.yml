@@ -1,16 +1,8 @@
 name: OKX Monitor (Push)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'okx_monitor.py'
-      - 'shared/**'
-      - 'monitor/**'
-      - 'analysis/**'
-      - 'tools/**'
-      - 'strategy/**'
-  workflow_dispatch:
+  workflow_dispatch:   # 2026-09-06：A 主监控已停用自动触发，只保留 TrendWatch(每15min)。
+                       # 需要临时查看自选币时在此手动 Run workflow。
 
 jobs:
   scan:

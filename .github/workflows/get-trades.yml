@@ -1,10 +1,7 @@
 name: Get Recent Trades
 
 on:
-  workflow_dispatch:
-  push:
-    paths:
-      - 'get_trades.py'
+  workflow_dispatch:   # 2026-09-06：A 辅助任务已停用自动触发，只保留 TrendWatch(每15min)。
 
 jobs:
   scan:
