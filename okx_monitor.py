@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-OKX 策略监控 v2.1
+OKX 策略监控 v2.1（2026-09-06：币池=自选+近7天成交，去热点/每日候选）
 - 方向: DMI/ADX (Wilder) + 摆动点+ATR (对比)
 - StochRSI: (K+D)/2, Wilder平滑
 - 评分: 方向分 1H=1, 4H=1, 1D=2 + SRSI极端值加分
 - 调度: 每15分钟扫描 → 日间(6-24)整点推送全量 / 夜间(0-6)仅高分预警
 - 文档: 所有扫描结果存入 okx_data/scans/YYYY-MM-DD.csv 供参数验证
 - 成交量分布: 基于1H K线计算POC/VA作为支撑阻力参考
+- 币池(2026-09-06): 只推 FIXED_SYMBOLS.txt 自选 + OKX 近7天成交过的币（orders-history 枚举），
+  不再读 SYMBOLS.txt 热点前2、不再推送每日候选推荐（SHIB/GALA/DOGE）。
 """
 import warnings
 warnings.filterwarnings("ignore")
@@ -313,32 +315,7 @@ def calc_volume_profile(candles, buckets=12):
         "dist_poc_pct": round(dist_poc, 1),
     }
 
-CANDIDATES = [
-    "SHIB-USDT-SWAP", "GALA-USDT-SWAP", "DOGE-USDT-SWAP",
-    "ADA-USDT-SWAP", "SOL-USDT-SWAP", "LTC-USDT-SWAP",
-    "XRP-USDT-SWAP", "AVAX-USDT-SWAP"
-]
-
-def scan_candidates():
-    results = []
-    existing = {s.replace("-USDT-SWAP","").replace("-USDT","") 
-                for s in SYMBOLS}
-    for sym in CANDIDATES:
-        name = sym.replace("-USDT-SWAP","")
-        if name in existing:
-            continue
-        candles = fetch_ohlcv(sym, "4H", 100)
-        if not candles:
-            continue
-        d, adx, _ = trend_dmi(candles)
-        if adx is None:
-            continue
-        quality = min(adx/30, 1)
-        results.append({"name": name, "quality": round(quality, 2), 
-                       "adx": round(adx, 1), "trend": d})
-        time.sleep(0.1)
-    results.sort(key=lambda x: -x["quality"])
-    return results[:3]
+# 2026-09-06：CANDIDATES + scan_candidates（每日候选推荐）已移除——币池限定为自选+近7天成交币。
 
 ALERT_THRESHOLD = 9
 
@@ -350,14 +327,9 @@ if os.path.exists(FIXED_FILE):
     with open(FIXED_FILE) as f:
         fixed_list = [l.strip() for l in f if l.strip() and not l.startswith('#')]
 
-DYNAMIC_FILE = os.path.join(PROJECT_ROOT, "SYMBOLS.txt")
-hot_list = []
-if os.path.exists(DYNAMIC_FILE):
-    with open(DYNAMIC_FILE) as f:
-        dynamic = [l.strip() for l in f if l.strip() and not l.startswith('#')]
-    hot_list = [s for s in dynamic if s not in fixed_list][:2]
-
-SYMBOLS = fixed_list + hot_list
+# 2026-09-06 起：币池不再读 SYMBOLS.txt 热点，改为「自选(FIXED) ∪ OKX 近7天成交币」，
+# 由 main() 内动态组装；此处仅保留自选作为兜底。
+SYMBOLS = list(fixed_list)
 
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "").strip()
 PUSHPLUS_TOKEN_FILE = os.path.join(PROJECT_ROOT, ".pushplus_token")
@@ -392,6 +364,35 @@ def _okx_req(method, path, params=None):
             return r.json()
         except: time.sleep(1)
     return {}
+
+def fetch_recent_traded_symbols(days=7, max_pages=5):
+    """枚举 OKX 近 N 天成交过的 USDT 永续币种（orders-history 不带 instId，分页拉全）。
+    返回去重后的 instId 列表（如 ['ORDI-USDT-SWAP', ...]）；失败返回 []。"""
+    end_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+    begin_ts = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
+    syms = []
+    seen = set()
+    after = None
+    for _ in range(max_pages):
+        params = {"instType": "SWAP", "state": "filled",
+                  "begin": str(begin_ts), "end": str(end_ts), "limit": "100"}
+        if after:
+            params["after"] = str(after)
+        data = _okx_req("GET", "/api/v5/trade/orders-history", params)
+        if data.get("code") != "0" or not data.get("data"):
+            break
+        batch = data["data"]
+        for o in batch:
+            inst = o.get("instId", "")
+            if "USDT-SWAP" in inst and inst not in seen:
+                seen.add(inst)
+                syms.append(inst)
+        if len(batch) < 100:
+            break
+        after = batch[-1].get("ordId")
+        time.sleep(0.12)
+    return syms
+
 
 def fetch_recent_trades(hours=4):
     end_ts = int(datetime.now(timezone.utc).timestamp()*1000)
@@ -645,18 +646,7 @@ def _send_pushplus_full(results, now_str, candidates=None):
         else:
             htm += f'<tr style="background:{bg}"><td style="padding:2px 3px;font-weight:bold">{nm}</td><td colspan="3" style="padding:2px 3px;text-align:center;color:#999">N/A</td></tr>'
     htm += '</table></div>'
-    if candidates:
-        htm += '<div style="margin-top:8px;padding:6px 8px;background:#f0fdf4;border-radius:4px;font-size:10px">'
-        htm += '<b>💡 今日优质品种:</b> '
-        recs = []
-        for c in candidates:
-            trend_icon = "📈" if c["trend"] == "多" else "📉"
-            recs.append(f'{trend_icon} {c["name"]}(ADX={c["adx"]:.0f})')
-        htm += " · ".join(recs)
-        htm += '</div>'
-    else:
-        htm += '<div style="margin-top:8px;padding:6px 8px;background:#fff8e1;border-radius:4px;font-size:10px">'
-        htm += '<b>💡 建议关注:</b> SHIB / GALA / DOGE — 趋势更强、插针更少</div>'
+    # 2026-09-06：移除「今日优质品种 / 建议关注 SHIB-GALA-DOGE」候选推荐块——币池已限定自选+持仓
     htm += f'<hr style="border:0;border-top:1px solid #eee;margin:8px 0"><p style="color:#999;font-size:10px;margin:1px 0">📐 DMI/ADX | 15min扫描 · 日间整点推送 | ≥{ALERT_THRESHOLD}预警</p><p style="color:#999;font-size:10px;margin:1px 0">🔔 下轮 {(datetime.now(timezone(timedelta(hours=8)))+timedelta(hours=1)).strftime("%H:%M")} CST</p></div>'
     payload = {"token": PUSHPLUS_TOKEN, "title": f"OKX {alert_count}预警" if alert_count else "OKX 策略扫描", "content": htm, "template": "html"}
     try:
@@ -829,6 +819,7 @@ def fmt_line(row):
             f"{b_flag}{bull:<4}   {r_flag}{bear:<4}  {net_s}")
 
 def main():
+    global SYMBOLS
     now = datetime.now(timezone(timedelta(hours=8)))
     now_str = now.strftime("%Y-%m-%d %H:%M CST")
     h, m = now.hour, now.minute
@@ -837,6 +828,14 @@ def main():
     print(f"\n{'='*60}")
     print(f"[{now_str}] {period_label}扫描 | 整点推送={'是' if is_full_push else '否'}")
     print(f"{'='*60}")
+    # 币池（2026-09-06 起）= 自选 FIXED_SYMBOLS + OKX 近7天成交币；不再读 SYMBOLS.txt 热点/每日候选
+    traded = fetch_recent_traded_symbols(days=7)
+    pool = list(fixed_list)
+    for s in traded:
+        if s not in pool:
+            pool.append(s)
+    SYMBOLS = pool
+    print(f"Scan pool: 自选 {len(fixed_list)} + 近7天成交 {len([s for s in traded if s not in fixed_list])} = {len(SYMBOLS)}")
     results = []
     for sym in SYMBOLS:
         try:
@@ -904,13 +903,7 @@ def main():
     global_ts, sym_cooldowns = load_cooldown_state()
     if is_full_push:
         print(f"\n📤 日间整点，推送完整报表...")
-        print(f"  🔍 扫描候选池...")
-        candidates = scan_candidates()
-        if candidates:
-            for c in candidates:
-                t = "📈" if c["trend"] == "多" else "📉"
-                print(f"    {t} {c['name']}: ADX={c['adx']:.0f} q={c['quality']:.2f}")
-        pushed = send_report(results, now_str, candidates)
+        pushed = send_report(results, now_str, [])  # 2026-09-06：不再附加每日候选推荐
         global_ts = time.time() if pushed else global_ts
     elif alerts:
         new_alerts = []
