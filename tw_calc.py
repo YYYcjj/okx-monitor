@@ -174,16 +174,16 @@ def near_resistance_ok(price, highs, pct=NEAR_LEVEL_PCT):
 
 
 def space_ok(info):
-    """目标空间硬门(补漏③)：有目标位、空间为正(未越过)，
-    且空间 >= MIN_SPACE_PCT% 或 >= MIN_SPACE_ATR×ATR，任一满足才通过。"""
+    """目标空间硬门(补漏③，2026-09-06 收紧)：有目标位、空间为正(未越过)，
+    且【同时满足】空间 >= MIN_SPACE_ATR×1h ATR 与 >= MIN_SPACE_PCT% 才通过。"""
     tgt = info.get("tgt")
     sp = info.get("space_pct")
     sa = info.get("space_atr")
     if tgt is None or sp is None or sp <= 0:
         return False
-    if sa is not None and sa >= MIN_SPACE_ATR:
-        return True
-    return sp >= MIN_SPACE_PCT
+    if sa is None:
+        return False
+    return sa >= MIN_SPACE_ATR and sp >= MIN_SPACE_PCT
 
 
 def classify(s1, s1h, s1p, s1hp, adx1h, atr_ratio, wick_ok_flag, d1h, d1d,
@@ -204,7 +204,7 @@ def classify(s1, s1h, s1p, s1hp, adx1h, atr_ratio, wick_ok_flag, d1h, d1d,
       做多要求当前值 > 前一根值(不再下探)，做空要求当前值 < 前一根值(不再上冲)，
       剔除「仍在加速赶底/赶顶」的接飞刀情形。s1p/s1hp 为 1d/1h SRSI 前一根值。
     空间硬门（补漏③）：目标位(做多=最近日线 swing high，做空=最近 swing low)的
-      空间 >= MIN_SPACE_PCT% 或 >= MIN_SPACE_ATR×ATR 才通过；目标被越过也剔除。
+      空间须同时 >= MIN_SPACE_ATR×1h ATR 与 >= MIN_SPACE_PCT% 才通过；目标被越过也剔除。
     返回 (类型, 方向, 附加信息dict) 或 None。"""
     if adx1h < ADX_THRESHOLD:
         return None
