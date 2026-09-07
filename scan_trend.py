@@ -2,8 +2,8 @@
 """
 TrendWatch —— 统一顺势信号扫描（2026-09-05 改版）
 
-核心逻辑（用户定义）：
-    在 1 日线关键位置找机会，1 小时与 1 日线共振（方向相同）、SRSI 同向；
+核心逻辑（2026-09-07 简化）：
+    1h 与 1d 结构共振同向 + SRSI 同向极端即触发（不再要求贴日线关键位、不做拐头确认）；
     其余（ATR<2%、插针门、15m 共振标注、TOP_N 等）都是筛选条件。
 
 两类触发（方向均由 1h/1d 结构共振决定，同多/同空）：
@@ -11,14 +11,12 @@ TrendWatch —— 统一顺势信号扫描（2026-09-05 改版）
     趋势：1h SRSI 极端（1h 多结构+SRSI<20→多；1h 空结构+SRSI>80→空）
 共用要求（不满足即剔除）：
     - 1h 结构方向 == 1d 结构方向 == 信号方向（共振同向，横盘 0 淘汰）
-    - 价格贴近日线关键位且【未破位】（做多价在 swing low 上方、做空价在 swing high 下方，NEAR_LEVEL_PCT 内）
-    - 1h ADX>20、ATR/价 < 2%（2026-09-07 起只要求上界，不再设 0.5% 下界）
+    - 1h ADX>20、ATR/价 < 2%（只要求上界，无 0.5% 下界）
     - 插针门（WICK_AVG_MAX / WICK_SPIKE_MAX）
-保险：非触发侧 SRSI 不在反向极端（做多时 1h/1d 均不>80；做空时均不<20）
-拐头确认（补漏②）：触发侧 SRSI 需从极值区回升——做多当前值>前一根、做空当前值<前一根，剔除仍在加速赶底/赶顶的接飞刀情形。
+保险：任一侧反向极端即剔除（做多时 1h/1d 均不>80；做空时均不<20）
 15m 共振：仅标注「★推荐」（15m 结构与信号同向），不再过滤，帮助优先关注。
 推送上限：每日最多前 TOP_N 个（回调优先于趋势、多优先于空、推荐优先、SRSI 越极端越靠前）。
-目标位与空间（2026-09-07 起仅展示、不参与过滤）：做多取日线最近 swing high、做空取最近 swing low。
+目标位与空间（仅展示、不参与过滤）：做多取日线最近 swing high、做空取最近 swing low。
 
 扫描池：成交量前 100 的 USDT 永续合约。
 去重：同一 CST 日期内同一「币种 + 类型 + 方向」只推送一次（状态存于 pushed_state.json）。
@@ -72,9 +70,6 @@ def main():
         s1h = srsi_last(kv1h)
         if s1 is None or s1h is None:
             continue
-        # SRSI 前一根值（拐头确认用，补漏②）：做多需从极值回升、做空需从极值回落
-        s1p = kv1[-2] if len(kv1) >= 2 else None
-        s1hp = kv1h[-2] if len(kv1h) >= 2 else None
         # 质量门指标（1h）
         atr1h = calc_atr(highs1h, lows1h, closes1h)
         adx1h = calc_adx(highs1h, lows1h, closes1h)
@@ -87,7 +82,7 @@ def main():
         d1d = structure_dir(highs1d, lows1d, min_pct=MIN_SWING_PCT_1D)
         # 日线 swing 点：关键位与参考目标
         sh1d, sl1d = find_swings(highs1d, lows1d, p=SWING_P)
-        res = classify(s1, s1h, s1p, s1hp, adx1h, atr_ratio, wflag, d1h, d1d,
+        res = classify(s1, s1h, adx1h, atr_ratio, wflag, d1h, d1d,
                        closes1[-1], sh1d, sl1d)
         if res is None:
             continue
@@ -159,7 +154,7 @@ def main():
         h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
         h += '<h3 style="margin:0 0 6px">TrendWatch（回调 / 趋势）</h3>'
         h += (f'<div style="font-size:11px;color:#666;margin-bottom:6px">'
-              f'1h/1d 共振同向 + SRSI 同向拐头 + 日线关键位未破 ｜ '
+              f'1h/1d 共振同向 + SRSI 同向极端(无拐头) ｜ '
               f'回调：1d SRSI 极端触发 ｜ 趋势：1h SRSI 极端触发 ｜ '
               f'质量门：ADX&gt;{ADX_THRESHOLD} &amp; ATR/价 &lt;{ATR_MAX_RATIO*100:.0f}% &amp; 插针门 ｜ 空间仅展示 ｜ '
               f'每日前 {TOP_N} 个　共 {len(new_cands)} 个</div>')
