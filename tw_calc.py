@@ -173,23 +173,9 @@ def near_resistance_ok(price, highs, pct=NEAR_LEVEL_PCT):
     return 0 < (lv - price) / price <= pct
 
 
-def space_ok(info):
-    """目标空间硬门(补漏③，2026-09-07 回退 OR)：有目标位、空间为正(未越过)，
-    且空间 >= MIN_SPACE_ATR×1h ATR 或 >= MIN_SPACE_PCT%，任一满足即通过。
-    （09-06 曾收紧为 AND(≥6×1hATR 且 ≥3%)，门槛过高致 9/6 起零推送，故回退。）"""
-    tgt = info.get("tgt")
-    sp = info.get("space_pct")
-    sa = info.get("space_atr")
-    if tgt is None or sp is None or sp <= 0:
-        return False
-    if sa is not None and sa >= MIN_SPACE_ATR:
-        return True
-    return sp >= MIN_SPACE_PCT
-
-
 def classify(s1, s1h, s1p, s1hp, adx1h, atr_ratio, wick_ok_flag, d1h, d1d,
              price, sh1d, sl1d):
-    """统一顺势信号（2026-09-05 改版 + 补漏 ①②③）：
+    """统一顺势信号（2026-09-05 改版 + 补漏 ①②；09-07 移除盈亏比门槛）:
     核心：1日线关键位置 + 1h 与 1d 共振(方向相同) + SRSI 同向。
     两类触发（方向均由 1h/1d 共振决定）：
       回调：1d SRSI 极端（1d 多结构+SRSI<20→多；1d 空结构+SRSI>80→空）
@@ -198,18 +184,19 @@ def classify(s1, s1h, s1p, s1hp, adx1h, atr_ratio, wick_ok_flag, d1h, d1d,
       - 1d 结构方向 == 1h 结构方向 == 信号方向（共振同向，横盘 0 淘汰）
       - 关键位置未破（补漏①）：做多贴近日线 swing low 且在其上方(未跌破)；
         做空贴近日线 swing high 且在其下方(未上破)；NEAR_LEVEL_PCT 内
-      - 1h ADX>20、ATR/价 在 (ATR_MIN_RATIO, ATR_MAX_RATIO)
+      - 1h ADX>20、ATR/价 < ATR_MAX_RATIO(2%)（09-07 起只要求上界，不再设 0.5% 下界）
       - 插针门（wick_ok_flag）
     保险：非触发侧 SRSI 不在反向极端（做多时 1h/1d 均不>80；做空时均不<20）
     SRSI 拐头确认（补漏②）：触发侧的 SRSI 需从极值区开始回升才有效——
       做多要求当前值 > 前一根值(不再下探)，做空要求当前值 < 前一根值(不再上冲)，
       剔除「仍在加速赶底/赶顶」的接飞刀情形。s1p/s1hp 为 1d/1h SRSI 前一根值。
-    空间硬门（补漏③）：目标位(做多=最近日线 swing high，做空=最近 swing low)的
-      空间 >= MIN_SPACE_ATR×1h ATR 或 >= MIN_SPACE_PCT% 任一满足才通过；目标被越过也剔除。
+    空间与目标位（补漏③已于 2026-09-07 移除硬门）：做多目标=最近日线 swing high、
+      做空=最近 swing low，仅随返回信息展示，不再参与过滤（目标被越过也照常返回）。
     返回 (类型, 方向, 附加信息dict) 或 None。"""
     if adx1h < ADX_THRESHOLD:
         return None
-    if not (ATR_MIN_RATIO < atr_ratio < ATR_MAX_RATIO):
+    # 波动门（2026-09-07 起只要求 ATR/价 < 2%，不再设 0.5% 下界）
+    if not (0 < atr_ratio < ATR_MAX_RATIO):
         return None
     # 1h 与 1d 必须共振同向（横盘 0 视为不共振，淘汰）
     if d1h != d1d or d1d == 0:
@@ -252,7 +239,7 @@ def classify(s1, s1h, s1p, s1hp, adx1h, atr_ratio, wick_ok_flag, d1h, d1d,
                 return None
             kind = "趋势"
         res = _mk(kind, "多", sh1d[-1][1] if sh1d else None)
-        return res if space_ok(res[2]) else None   # 补漏③：空间硬门
+        return res  # 2026-09-07：盈亏比/空间门槛已移除，空间仅展示
     else:  # dirn == -1
         triggered = (s1 > SRSI_HIGH) or (s1h > SRSI_HIGH)
         reverse = (s1 < SRSI_LOW) or (s1h < SRSI_LOW)
@@ -267,7 +254,7 @@ def classify(s1, s1h, s1p, s1hp, adx1h, atr_ratio, wick_ok_flag, d1h, d1d,
                 return None
             kind = "趋势"
         res = _mk(kind, "空", sl1d[-1][1] if sl1d else None)
-        return res if space_ok(res[2]) else None   # 补漏③：空间硬门
+        return res  # 2026-09-07：盈亏比/空间门槛已移除，空间仅展示
 
 
 def fmt_p(p, inst):
