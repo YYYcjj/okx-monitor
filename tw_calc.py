@@ -152,32 +152,51 @@ def structure_dir(highs, lows, p=SWING_P, min_pct=0.003):
     return 0
 
 
+def near_key_level(price, levels, pct=NEAR_LEVEL_PCT):
+    """价格是否贴近日线关键位：与任一 swing 高低点的相对距离 <= pct（双向贴靠）。
+    用于顺势信号判断「处于关键位置」（做多传 swing low、做空传 swing high）。
+    2026-09-07 恢复为 9/5(推12个)行为：破位(越过)后仍在 ±pct 内也算贴近。"""
+    if price <= 0:
+        return False
+    for lv in levels:
+        if lv and abs(price - lv) / price <= pct:
+            return True
+    return False
+
+
 def classify(s1, s1h, adx1h, atr_ratio, wick_ok_flag, d1h, d1d,
              price, sh1d, sl1d):
-    """统一顺势信号（2026-09-07 简化版）:
-    核心：1h 与 1d 共振同向 + SRSI 同向极端即触发（去掉关键位贴靠与拐头确认）。
+    """统一顺势信号（2026-09-07 恢复 9/5 推送版逻辑）:
+    核心：1日线关键位置 + 1h 与 1d 共振同向 + SRSI 同向极端（对应 9/5 白天推 12 个信号的 9872a3c）。
     两类触发（方向均由 1h/1d 结构共振决定）：
       回调：1d SRSI 极端（1d 多结构+SRSI<20→多；1d 空结构+SRSI>80→空）
       趋势：1h SRSI 极端（1h 多结构+SRSI<20→多；1h 空结构+SRSI>80→空）
     共用要求（不满足即剔除）：
       - 1d 结构方向 == 1h 结构方向 == 信号方向（共振同向，横盘 0 淘汰）
-      - 1h ADX>20、ATR/价 < ATR_MAX_RATIO(2%)（只要求上界，无 0.5% 下界）
+      - 价格贴近日线关键位：做多近 swing low、做空近 swing high，距离 <= NEAR_LEVEL_PCT(±1.5%)
+      - 1h ADX>20、ATR/价 在 (ATR_MIN_RATIO=0.5%, ATR_MAX_RATIO=2%)
       - 插针门（wick_ok_flag）
     保险：任一侧反向极端即剔除（做多时 1h/1d 均不>80；做空时均不<20）
-    说明：2026-09-07 用户去掉「日线关键位未破(±1.5%)」与「SRSI 拐头确认」两道条件；
-      不再检查近 swing 关键位，也不再要求当前值>前值回升。
-    目标位与空间（仅展示、不参与过滤）：做多目标=最近日线 swing high、做空=最近 swing low，
-      目标被越过也照常返回。
+    说明：无拐头确认、无空间/盈亏比门槛（均为 9/5 深夜才加入，本版对应推送 12 个时的状态）。
+    目标位与空间（仅展示、不参与过滤）：做多目标=最近日线 swing high、做空=最近 swing low。
     返回 (类型, 方向, 附加信息dict) 或 None。"""
     if adx1h < ADX_THRESHOLD:
         return None
-    # 波动门（只要求 ATR/价 < 2%）
-    if not (0 < atr_ratio < ATR_MAX_RATIO):
+    # 波动门：ATR/价 在 (0.5%, 2%)
+    if not (ATR_MIN_RATIO < atr_ratio < ATR_MAX_RATIO):
         return None
     # 1h 与 1d 必须共振同向（横盘 0 视为不共振，淘汰）
     if d1h != d1d or d1d == 0:
         return None
     dirn = d1d  # 信号方向 = 结构方向（1h/1d 已一致）
+
+    # 关键位置：做多贴近日线 swing low（支撑），做空贴近日线 swing high（阻力）
+    if dirn == 1:
+        if not near_key_level(price, [p for _, p in sl1d[-2:]]):
+            return None
+    else:
+        if not near_key_level(price, [p for _, p in sh1d[-2:]]):
+            return None
 
     if not wick_ok_flag:
         return None
@@ -192,7 +211,7 @@ def classify(s1, s1h, adx1h, atr_ratio, wick_ok_flag, d1h, d1d,
             info["space_atr"] = sp / atr_ratio if atr_ratio > 0 else None
         return (kind, dn, info)
 
-    # SRSI 同向极端触发（无拐头要求）：先保险（任一侧反向极端剔除），再按触发侧分类
+    # SRSI 同向极端触发：先保险（任一侧反向极端剔除），再按触发侧分类
     if dirn == 1:
         if s1 > SRSI_HIGH or s1h > SRSI_HIGH:   # 保险：做多时两侧均不得>80
             return None
