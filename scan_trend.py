@@ -4,7 +4,7 @@ TrendWatch —— 统一顺势信号扫描（2026-09-05 改版）
 
 核心逻辑（用户定义）：
     在 1 日线关键位置找机会，1 小时与 1 日线共振（方向相同）、SRSI 同向；
-    其余（ATR 0.5%-2%、插针门、15m 共振标注、TOP_N 等）都是筛选条件。
+    其余（ATR<2%、插针门、15m 共振标注、TOP_N 等）都是筛选条件。
 
 两类触发（方向均由 1h/1d 结构共振决定，同多/同空）：
     回调：1d SRSI 极端（1d 多结构+SRSI<20→多；1d 空结构+SRSI>80→空）
@@ -12,14 +12,13 @@ TrendWatch —— 统一顺势信号扫描（2026-09-05 改版）
 共用要求（不满足即剔除）：
     - 1h 结构方向 == 1d 结构方向 == 信号方向（共振同向，横盘 0 淘汰）
     - 价格贴近日线关键位且【未破位】（做多价在 swing low 上方、做空价在 swing high 下方，NEAR_LEVEL_PCT 内）
-    - 1h ADX>20、ATR/价 在 (0.5%, 2%)
+    - 1h ADX>20、ATR/价 < 2%（2026-09-07 起只要求上界，不再设 0.5% 下界）
     - 插针门（WICK_AVG_MAX / WICK_SPIKE_MAX）
 保险：非触发侧 SRSI 不在反向极端（做多时 1h/1d 均不>80；做空时均不<20）
 拐头确认（补漏②）：触发侧 SRSI 需从极值区回升——做多当前值>前一根、做空当前值<前一根，剔除仍在加速赶底/赶顶的接飞刀情形。
-空间硬门（补漏③，2026-09-07 回退 OR）：目标位空间 >=1.5×1h ATR 或 >=3% 任一满足才通过（不足/已越过均剔除）。
 15m 共振：仅标注「★推荐」（15m 结构与信号同向），不再过滤，帮助优先关注。
 推送上限：每日最多前 TOP_N 个（回调优先于趋势、多优先于空、推荐优先、SRSI 越极端越靠前）。
-目标位与空间：做多取日线最近 swing high、做空取最近 swing low，达标后仅展示空间。
+目标位与空间（2026-09-07 起仅展示、不参与过滤）：做多取日线最近 swing high、做空取最近 swing low。
 
 扫描池：成交量前 100 的 USDT 永续合约。
 去重：同一 CST 日期内同一「币种 + 类型 + 方向」只推送一次（状态存于 pushed_state.json）。
@@ -162,7 +161,7 @@ def main():
         h += (f'<div style="font-size:11px;color:#666;margin-bottom:6px">'
               f'1h/1d 共振同向 + SRSI 同向拐头 + 日线关键位未破 ｜ '
               f'回调：1d SRSI 极端触发 ｜ 趋势：1h SRSI 极端触发 ｜ '
-              f'质量门：ADX&gt;{ADX_THRESHOLD} &amp; ATR/价 {ATR_MIN_RATIO*100:.1f}-{ATR_MAX_RATIO*100:.0f}% &amp; 插针门 &amp; 空间≥{MIN_SPACE_ATR:g}×ATR或≥{MIN_SPACE_PCT:g}% ｜ '
+              f'质量门：ADX&gt;{ADX_THRESHOLD} &amp; ATR/价 &lt;{ATR_MAX_RATIO*100:.0f}% &amp; 插针门 ｜ 空间仅展示 ｜ '
               f'每日前 {TOP_N} 个　共 {len(new_cands)} 个</div>')
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
