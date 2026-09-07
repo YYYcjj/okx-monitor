@@ -16,7 +16,7 @@ TrendWatch —— 统一顺势信号扫描（2026-09-05 改版）
     - 插针门（WICK_AVG_MAX / WICK_SPIKE_MAX）
 保险：非触发侧 SRSI 不在反向极端（做多时 1h/1d 均不>80；做空时均不<20）
 拐头确认（补漏②）：触发侧 SRSI 需从极值区回升——做多当前值>前一根、做空当前值<前一根，剔除仍在加速赶底/赶顶的接飞刀情形。
-空间硬门（补漏③，2026-09-06 收紧）：目标位空间须同时 >=6×1h ATR 且 >=3% 才通过（不足/已越过均剔除）。
+空间硬门（补漏③，2026-09-07 回退 OR）：目标位空间 >=1.5×1h ATR 或 >=3% 任一满足才通过（不足/已越过均剔除）。
 15m 共振：仅标注「★推荐」（15m 结构与信号同向），不再过滤，帮助优先关注。
 推送上限：每日最多前 TOP_N 个（回调优先于趋势、多优先于空、推荐优先、SRSI 越极端越靠前）。
 目标位与空间：做多取日线最近 swing high、做空取最近 swing low，达标后仅展示空间。
@@ -162,7 +162,7 @@ def main():
         h += (f'<div style="font-size:11px;color:#666;margin-bottom:6px">'
               f'1h/1d 共振同向 + SRSI 同向拐头 + 日线关键位未破 ｜ '
               f'回调：1d SRSI 极端触发 ｜ 趋势：1h SRSI 极端触发 ｜ '
-              f'质量门：ADX&gt;{ADX_THRESHOLD} &amp; ATR/价 {ATR_MIN_RATIO*100:.1f}-{ATR_MAX_RATIO*100:.0f}% &amp; 插针门 &amp; 空间≥{MIN_SPACE_ATR:g}×ATR且≥{MIN_SPACE_PCT:g}% ｜ '
+              f'质量门：ADX&gt;{ADX_THRESHOLD} &amp; ATR/价 {ATR_MIN_RATIO*100:.1f}-{ATR_MAX_RATIO*100:.0f}% &amp; 插针门 &amp; 空间≥{MIN_SPACE_ATR:g}×ATR或≥{MIN_SPACE_PCT:g}% ｜ '
               f'每日前 {TOP_N} 个　共 {len(new_cands)} 个</div>')
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
