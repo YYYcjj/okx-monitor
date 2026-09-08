@@ -4,7 +4,7 @@
 口径说明：
   关键位 = 触发日(2025-09-05)前最后两个 swing low(做多) / swing high(做空)，同 TrendWatch 逻辑(SWING_P=5)。
   触及   = 某日 K 线区间与 [p*0.995, p*1.005] 相交算一次接触；连续接触合并为 1 次事件，
-           需价格明显离开(>2%远离)后再返回才算下一次。统计到触发日前一天为止。
+           需价格明显离开(>2%远离)后再返回才算下一次。仅统计最近一个月（2025-08-01 起），到触发日前一天止。
 输出：keylevel_report.md（自动 commit）。
 """
 import requests, time, os, json
@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 OKX = "https://www.okx.com"
 S = 5
 END = int(datetime(2025, 9, 5, tzinfo=timezone.utc).timestamp() * 1000) + 86400000  # 9/5 收盘后
-BEGIN = int(datetime(2024, 8, 1, tzinfo=timezone.utc).timestamp() * 1000)          # 提前约 13 个月
+BEGIN = int(datetime(2025, 8, 1, tzinfo=timezone.utc).timestamp() * 1000)          # 统计最近一个月（用户指定）
 
 # 9/5 推送记录：币 -> 方向
 SYMS = {
@@ -74,8 +74,8 @@ def touch_events(candles, p):
     return ev
 
 def main():
-    out = ["# 9/5 推送信号的 swing 关键位历史触及统计", "",
-           f"口径：关键位=触发前最后两个 swing(窗口{S})；触及事件=价格进入 ±0.5% 区间(离开>2% 算一次)，截至 2025-09-04。",
+    out = ["# 9/5 推送信号的 swing 关键位触及统计（最近一个月）", "",
+           f"口径：关键位=触发前最后两个 swing(窗口{S})；触及=价格进入 ±0.5% 区间(离开>2% 算一次)，统计窗口 2025-08-01 ~ 09-04。",
            "", "| 币 | 方向 | 最近swing#1 价位 | 触及次数 | 最近swing#2 价位 | 触及次数 |",
            "|---|---|---|---|---|---|---|"]
     hard, soft = 0, 0
