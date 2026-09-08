@@ -1,0 +1,38 @@
+name: Analyze Key Levels (9/5 signals)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: analyze-keylevels
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests --quiet
+
+      - name: Run key-level touch analysis
+        run: python analyze_keylevels.py
+
+      - name: Commit report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add keylevel_report.md
+          git commit -m "chore: keylevel touch report [skip ci]" || echo "nothing to commit"
+          git push
