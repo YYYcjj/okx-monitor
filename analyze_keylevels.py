@@ -21,14 +21,20 @@ SYMS = {
     "PEOPLE": "多", "PIPPIN": "多", "SHIB": "多", "STRK": "多", "SUI": "多", "ZAMA": "多",
 }
 
+def _fetch(params):
+    for _ in range(4):
+        try:
+            r = requests.get(f"{OKX}/api/v5/market/history-candles", params=params, timeout=15)
+            return r.json()
+        except Exception:
+            time.sleep(1.0)
+    return {"code": "net_err", "msg": "network retry exhausted"}
+
 def get_daily(inst):
     candles = []
     after = END
     while True:
-        url = f"{OKX}/api/v5/market/history-candles"
-        r = requests.get(url, params={"instId": inst, "bar": "1D", "after": str(after),
-                                      "limit": "100"}, timeout=15)
-        d = r.json()
+        d = _fetch({"instId": inst, "bar": "1D", "after": str(after), "limit": "100"})
         if d.get("code") != "0" or not d.get("data"):
             break
         for c in d["data"]:
@@ -81,28 +87,34 @@ def main():
     hard, soft = 0, 0
     detail = []
     for name, dr in SYMS.items():
-        inst = f"{name}-USDT-SWAP"
-        highs, candles = get_daily(inst)
-        if not candles:
-            out.append(f"| {name} | {dr} | 拉取失败 | - | - | - |")
+        try:
+            inst = f"{name}-USDT-SWAP"
+            highs, candles = get_daily(inst)
+            if not candles:
+                out.append(f"| {name} | {dr} | 拉取失败 | - | - | - |")
+                continue
+            lows = [c["l"] for c in candles]
+            # 只在截至 9/5 前已能确认的 K 线上找 swing（右侧需 S 根确认窗口，且不含 9/5 当日）
+            conf = max(0, len(candles) - 1 - S)
+            sh, sl = find_swings(highs[:conf], lows[:conf])
+            if dr == "多" and len(sl) >= 2:
+                lv = [sl[-2], sl[-1]]
+            elif dr == "空" and len(sh) >= 2:
+                lv = [sh[-2], sh[-1]]
+            else:
+                out.append(f"| {name} | {dr} | swing 不足 | - | - | - |")
+                continue
+            p1, p2 = lv[-2][1], lv[-1][1]
+            t1, t2 = touch_events(candles, p1), touch_events(candles, p2)
+            out.append(f"| {name} | {dr} | {p1:.6g} | {t1} | {p2:.6g} | {t2} |")
+            detail.append((name, dr, p1, t1, p2, t2))
+            hard += (1 if t1 >= 2 else 0) + (1 if t2 >= 2 else 0)
+            soft += (1 if t1 == 1 else 0) + (1 if t2 == 1 else 0)
+        except Exception as e:
+            import traceback
+            out.append(f"| {name} | {dr} | 异常: {e} | - | - | - |")
+            print(f"ERR {name}: {traceback.format_exc()}")
             continue
-        lows = [c["l"] for c in candles]
-        # 只在截至 9/5 前已能确认的 K 线上找 swing（右侧需 S 根确认窗口，且不含 9/5 当日）
-        conf = max(0, len(candles) - 1 - S)
-        sh, sl = find_swings(highs[:conf], lows[:conf])
-        if dr == "多" and len(sl) >= 2:
-            lv = [sl[-2], sl[-1]]
-        elif dr == "空" and len(sh) >= 2:
-            lv = [sh[-2], sh[-1]]
-        else:
-            out.append(f"| {name} | {dr} | swing 不足 | - | - | - |")
-            continue
-        p1, p2 = lv[-2][1], lv[-1][1]
-        t1, t2 = touch_events(candles, p1), touch_events(candles, p2)
-        out.append(f"| {name} | {dr} | {p1:.6g} | {t1} | {p2:.6g} | {t2} |")
-        detail.append((name, dr, p1, t1, p2, t2))
-        hard += (1 if t1 >= 2 else 0) + (1 if t2 >= 2 else 0)
-        soft += (1 if t1 == 1 else 0) + (1 if t2 == 1 else 0)
     total = hard + soft
     out.append("")
     out.append(f"**总计 {total} 个候选关键位：多次验证(≥2次触及) {hard} 个 ({hard/max(total,1)*100:.0f}%)；单次偶然点(仅1次) {soft} 个。**")
@@ -115,4 +127,12 @@ def main():
     print("\nDONE")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print("FATAL:", tb)
+        with open("keylevel_report.md", "w") as f:
+            f.write("# 分析失败\n\n```\n" + tb + "\n```\n")
+        raise

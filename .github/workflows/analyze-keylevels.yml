@@ -27,12 +27,13 @@ jobs:
         run: pip install requests --quiet
 
       - name: Run key-level touch analysis
-        run: python analyze_keylevels.py
+        run: python analyze_keylevels.py 2>&1 | tee analyze_run.log
 
-      - name: Commit report
+      - name: Commit report/log
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add keylevel_report.md
-          git commit -m "chore: keylevel touch report [skip ci]" || echo "nothing to commit"
+          git add keylevel_report.md analyze_run.log
+          git commit -m "chore: keylevel report/log [skip ci]" || echo "nothing to commit"
           git push
