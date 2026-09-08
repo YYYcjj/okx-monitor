@@ -2,8 +2,9 @@ name: Trend Candidate Watch
 
 on:
   schedule:
-    # 每 15 分钟扫描一次，有信号即推送（同日同币去重）
-    - cron: '*/15 * * * *'
+    # 每 30 分钟扫描一次，有信号即推送（同日同币去重）
+    # 2026-09-08：原 */15 被 GitHub 节流到实际 4-5h 一次，改 30min 提高准时性
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 permissions:
