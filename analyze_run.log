@@ -1,0 +1,60 @@
+ERR CFX: Traceback (most recent call last):
+  File "/home/runner/work/okx-monitor/okx-monitor/analyze_keylevels.py", line 108, in main
+    t1, t2 = touch_events(candles, p1), touch_events(candles, p2)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/okx-monitor/okx-monitor/analyze_keylevels.py", line 73, in touch_events
+    touch = c["low"] <= p * 1.005 and c["high"] >= p * 0.995
+            ~^^^^^^^
+KeyError: 'low'
+
+ERR ICX: Traceback (most recent call last):
+  File "/home/runner/work/okx-monitor/okx-monitor/analyze_keylevels.py", line 108, in main
+    t1, t2 = touch_events(candles, p1), touch_events(candles, p2)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/okx-monitor/okx-monitor/analyze_keylevels.py", line 73, in touch_events
+    touch = c["low"] <= p * 1.005 and c["high"] >= p * 0.995
+            ~^^^^^^^
+KeyError: 'low'
+
+ERR PEOPLE: Traceback (most recent call last):
+  File "/home/runner/work/okx-monitor/okx-monitor/analyze_keylevels.py", line 108, in main
+    t1, t2 = touch_events(candles, p1), touch_events(candles, p2)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/okx-monitor/okx-monitor/analyze_keylevels.py", line 73, in touch_events
+    touch = c["low"] <= p * 1.005 and c["high"] >= p * 0.995
+            ~^^^^^^^
+KeyError: 'low'
+
+ERR STRK: Traceback (most recent call last):
+  File "/home/runner/work/okx-monitor/okx-monitor/analyze_keylevels.py", line 108, in main
+    t1, t2 = touch_events(candles, p1), touch_events(candles, p2)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/okx-monitor/okx-monitor/analyze_keylevels.py", line 73, in touch_events
+    touch = c["low"] <= p * 1.005 and c["high"] >= p * 0.995
+            ~^^^^^^^
+KeyError: 'low'
+
+# 9/5 推送信号的 swing 关键位触及统计（最近一个月）
+
+口径：关键位=触发前最后两个 swing(窗口5)；触及=价格进入 ±0.5% 区间(离开>2% 算一次)，统计窗口 2025-08-01 ~ 09-04。
+
+| 币 | 方向 | 最近swing#1 价位 | 触及次数 | 最近swing#2 价位 | 触及次数 |
+|---|---|---|---|---|---|---|
+| ALGO | 多 | swing 不足 | - | - | - |
+| CFX | 多 | 异常: 'low' | - | - | - |
+| ICX | 空 | 异常: 'low' | - | - | - |
+| LAB | 空 | 拉取失败 | - | - | - |
+| NEIRO | 多 | swing 不足 | - | - | - |
+| OL | 多 | 拉取失败 | - | - | - |
+| PEOPLE | 多 | 异常: 'low' | - | - | - |
+| PIPPIN | 多 | 拉取失败 | - | - | - |
+| SHIB | 多 | swing 不足 | - | - | - |
+| STRK | 多 | 异常: 'low' | - | - | - |
+| SUI | 多 | swing 不足 | - | - | - |
+| ZAMA | 多 | 拉取失败 | - | - | - |
+
+**总计 0 个候选关键位：多次验证(≥2次触及) 0 个 (0%)；单次偶然点(仅1次) 0 个。**
+
+> 注：最近 swing#2 是代码实际贴靠判定的主要对象（classify 取 sl1d[-1] 为主贴靠位/目标展示），两个都列出便于对比。
+
+DONE
