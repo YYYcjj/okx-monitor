@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # TrendWatch 指标与信号判定层（2026-09-04 从 scan_trend.py 拆分）
-# 2026-09-10：classify 移除 1h/1d 结构共振 + 插针门，方向仍由 1d 结构决定
+# 2026-09-10：classify 移除 1h/1d 结构共振 + 插针门
+# 2026-09-13：classify 新增 1h 与 SRSI 极端侧同向门 + 目标空间 >10% 门
 from tw_conf import *
 
 def calc_rsi(closes, period=14):
@@ -139,7 +140,7 @@ def structure_dir(highs, lows, p=SWING_P, min_pct=0.003):
     上行(1) = 最近两个 swing high 走高(HH) 且 最近两个 swing low 走高(HL)，且两组差值均 > min_pct*价格量级
     下行(-1)= 最近两个 swing high 走低(LH) 且 最近两个 swing low 走低(LL)，且两组差值均 > min_pct*价格量级
     否则(结构混合/样本不足/摆幅不足) = 0（横盘，不计入方向）
-    注：2026-09-05 起作为信号条件；2026-09-10 起仅 1d 结构用于定方向，1h/15m 结构仅展示。"""
+    注：2026-09-05 起作为信号条件；1d 结构定方向，1h 结构需与信号侧同向（2026-09-13 新增）。"""
     sh, sl = find_swings(highs, lows, p)
     if len(sh) < 2 or len(sl) < 2:
         return 0
@@ -168,29 +169,34 @@ def near_key_level(price, levels, pct=NEAR_LEVEL_PCT):
 
 def classify(s1, s1h, adx1h, atr_ratio, d1h, d1d,
              price, sh1d, sl1d):
-    """统一顺势信号（2026-09-10 修订：移除 1h/1d 结构共振 + 插针门）:
+    """统一顺势信号（2026-09-13 新增两道门：1h 与 SRSI 极端侧同向 + 目标空间 >10%）:
     核心：1日线关键位置 + 1d 结构定方向 + SRSI 同向极端。
-    说明：无拐头确认、无空间/盈亏比门槛。
-    两类触发（方向均由 1d 结构决定，2026-09-10 起不再要求 1h 同向）：
+    两类触发（方向均由 1d 结构决定）：
       回调：1d SRSI 极端（1d 多结构+SRSI<20→多；1d 空结构+SRSI>80→空）
       趋势：1h SRSI 极端（1h SRSI<20→多；1h SRSI>80→空）
     共用要求（不满足即剔除）：
-      - 方向 = 1d 结构方向（横盘 0 淘汰；2026-09-10 移除 1h/1d 共振要求，1h/15m 结构仅展示）
+      - 方向 = 1d 结构方向（横盘 0 淘汰）
+      - 1h 结构方向 == 信号侧（2026-09-13 新增）：SRSI 在低位（<20，做多侧）要求 1h 多头；
+        SRSI 在高位（>80，做空侧）要求 1h 空头；1h 横盘(0)或反向一律淘汰
       - 价格贴近日线关键位：做多近 swing low、做空近 swing high，距离 <= NEAR_LEVEL_PCT(±1.5%)
       - 1h ADX>20、ATR/价 在 (ATR_MIN_RATIO=0.5%, ATR_MAX_RATIO=2%)
-      （2026-09-10 移除插针门 wick_ok_flag）
+      - 目标空间 > MIN_SPACE_PCT(10%)（2026-09-13 新增）：目标=最近日线 swing 高/低
     保险：任一侧反向极端即剔除（做多时 1h/1d 均不>80；做空时均不<20）
-    目标位与空间（仅展示、不参与过滤）：做多目标=最近日线 swing high、做空=最近 swing low。
     返回 (类型, 方向, 附加信息dict) 或 None。"""
     if adx1h < ADX_THRESHOLD:
         return None
     # 波动门：ATR/价 在 (0.5%, 2%)
     if not (ATR_MIN_RATIO < atr_ratio < ATR_MAX_RATIO):
         return None
-    # 方向由 1d 结构决定（2026-09-10 移除 1h/1d 共振要求，横盘 0 淘汰）
+    # 方向由 1d 结构决定（横盘 0 淘汰）
     if d1d == 0:
         return None
     dirn = d1d  # 信号方向 = 1d 结构方向
+
+    # 方向一致性门（2026-09-13 新增）：1h 结构必须与信号侧一致
+    #   SRSI 极端低位（<20，做多侧）→ 1h 必须多头；极端高位（>80，做空侧）→ 1h 必须空头
+    if d1h != dirn:
+        return None
 
     # 关键位置：做多贴近日线 swing low（支撑），做空贴近日线 swing high（阻力）
     if dirn == 1:
@@ -201,13 +207,16 @@ def classify(s1, s1h, adx1h, atr_ratio, d1h, d1d,
             return None
 
     def _mk(kind, dn, target):
-        """统一附带目标位 / 空间百分比 / 空间相当于几倍 ATR"""
-        info = {"tgt": target, "space_pct": None, "space_atr": None}
-        if target and price > 0:
-            # 按交易方向取符号：多=(目标-现价)/现价，空=(现价-目标)/现价
-            sp = (target - price) / price if dn == "多" else (price - target) / price
-            info["space_pct"] = sp * 100.0
-            info["space_atr"] = sp / atr_ratio if atr_ratio > 0 else None
+        """统一附带目标位 / 空间百分比 / 空间相当于几倍 ATR。
+        空间门（2026-09-13 新增）：无目标位或空间 <= MIN_SPACE_PCT 则不放行。"""
+        if not target or price <= 0:
+            return None
+        # 按交易方向取符号：多=(目标-现价)/现价，空=(现价-目标)/现价
+        sp = (target - price) / price if dn == "多" else (price - target) / price
+        if sp * 100.0 <= MIN_SPACE_PCT:
+            return None
+        info = {"tgt": target, "space_pct": sp * 100.0,
+                "space_atr": sp / atr_ratio if atr_ratio > 0 else None}
         return (kind, dn, info)
 
     # SRSI 同向极端触发：先保险（任一侧反向极端剔除），再按触发侧分类

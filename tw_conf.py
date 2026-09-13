@@ -25,7 +25,8 @@ ADX_THRESHOLD = 20      # 1h ADX > 20 确认趋势动能足够
 ATR_PERIOD = 14
 ATR_MIN_RATIO = 0.005   # ATR/价格 > 0.5%，波动足够才有交易空间（下界，2026-09-07 恢复 9/5 区间要求）
 ATR_MAX_RATIO = 0.02    # ATR/价格 < 2%，波动过大(风险失控)则剔除（上界）
-# 注：目标空间硬门（MIN_SPACE_PCT/MIN_SPACE_ATR/space_ok）维持 2026-09-07 移除状态：空间仅展示、不参与过滤。
+MIN_SPACE_PCT = 10.0    # 目标空间下限：目标位（日线 swing 高/低）到现价的空间必须 > 10%（2026-09-13 新增，重新启用空间硬门）
+# 注：MIN_SPACE_ATR / space_ok 仍维持移除状态；空间判定只用上面的百分比门。
 WICK_LOOKBACK = 20      # 最近 20 根 1h K 线评估插针
 WICK_AVG_MAX = 6.0      # 平均影线占比上限（放宽：原 4.0 对 1h K 线过严，单根插针即误杀）
 WICK_SPIKE_MAX = 10.0    # 单根最大影线占比上限（放宽：保留对真实插针泵/砸的过滤）
