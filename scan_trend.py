@@ -2,8 +2,8 @@
 """
 TrendWatch —— 统一顺势信号扫描（2026-09-05 改版）
 
-核心逻辑（2026-09-13 修订：新增 1h 与 SRSI 极端侧同向门 + 目标空间 >10% 门）：
-    在 1 日线关键位置找机会：1d 结构定方向 + 1h 与信号侧同向 + SRSI 同向极端 + 空间 >10% 即触发；
+核心逻辑（2026-09-13 修订：新增目标空间 >10% 门；1h 结构不参与过滤）：
+    在 1 日线关键位置找机会：1d 结构定方向 + SRSI 同向极端 + 空间 >10% 即触发；
     其余（ATR 0.5%-2%、15m 共振标注、TOP_N 等）都是筛选条件。
 
 两类触发（方向均由 1d 结构决定，横盘 0 淘汰）：
@@ -11,10 +11,10 @@ TrendWatch —— 统一顺势信号扫描（2026-09-05 改版）
     趋势：1h SRSI 极端（1h SRSI<20→多；1h SRSI>80→空）
 共用要求（不满足即剔除）：
     - 方向 = 1d 结构方向（横盘 0 淘汰）
-    - 1h 结构方向 == 信号侧（2026-09-13 新增）：SRSI<20 要求 1h 多头；SRSI>80 要求 1h 空头；1h 横盘/反向淘汰
     - 价格贴近日线关键位（做多近 swing low 支撑 / 做空近 swing high 阻力，距离 <=1.5% 双向贴靠）
     - 1h ADX>20、ATR/价 在 (0.5%, 2%)
     - 目标空间 > MIN_SPACE_PCT(10%)（2026-09-13 新增；2026-09-10 移除的插针门仍不启用）
+    （2026-09-13 同日加入又撤销的「1h 与信号侧同向」门不保留，1h 结构仅展示）
 保险：任一侧反向极端即剔除（做多时 1h/1d 均不>80；做空时均不<20）
 15m 共振：仅标注「★推荐」（15m 结构与信号同向），不再过滤，帮助优先关注。
 推送上限：每日最多前 TOP_N 个（回调优先于趋势、多优先于空、推荐优先、SRSI 越极端越靠前）。
@@ -78,7 +78,7 @@ def main():
         if atr1h is None or adx1h is None:
             continue
         atr_ratio = atr1h / closes1h[-1] if closes1h[-1] > 0 else 0.0
-        # 结构方向（1d 定方向；1h 需与信号侧同向，2026-09-13 新增）
+        # 结构方向（1d 定方向；1h/15m 仅展示，不参与过滤）
         d1h = structure_dir(highs1h, lows1h, min_pct=MIN_SWING_PCT_1H)
         d1d = structure_dir(highs1d, lows1d, min_pct=MIN_SWING_PCT_1D)
         # 日线 swing 点：关键位与参考目标
@@ -155,7 +155,7 @@ def main():
         h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
         h += '<h3 style="margin:0 0 6px">TrendWatch（回调 / 趋势）</h3>'
         h += (f'<div style="font-size:11px;color:#666;margin-bottom:6px">'
-              f'1d 结构定方向 + 1h 与信号侧同向 + SRSI 同向极端 + 贴日线关键位 ｜ '
+              f'1d 结构定方向 + SRSI 同向极端 + 贴日线关键位 ｜ '
               f'回调：1d SRSI 极端触发 ｜ 趋势：1h SRSI 极端触发 ｜ '
               f'质量门：ADX&gt;{ADX_THRESHOLD} &amp; ATR/价 {ATR_MIN_RATIO*100:.1f}-{ATR_MAX_RATIO*100:.0f}% &amp; 空间&gt;{MIN_SPACE_PCT:.0f}% ｜ '
               f'每日前 {TOP_N} 个　共 {len(new_cands)} 个</div>')
