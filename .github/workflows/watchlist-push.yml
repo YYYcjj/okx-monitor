@@ -2,8 +2,8 @@ name: Watchlist Push
 
 on:
   schedule:
-    # 每天 08:00 / 16:00 CST → UTC 0,8 点（2026-09-06 降频为每天两次）
-    - cron: '0 0,8 * * *'
+    # 每天 08:00 CST（= UTC 00:00）推送一次（2026-09-19 由每天两次降为一天一次）
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 jobs:
