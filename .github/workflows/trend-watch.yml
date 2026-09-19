@@ -46,32 +46,3 @@ jobs:
             git commit -m "chore: update trendwatch dedup state [skip ci]" || echo "nothing to commit"
             git push
           fi
-
-  # 【临时】逐门诊断：统计每道门各淘汰多少币，写 gate_diag.md（定位“为何无推送”，判定用后即撤）
-  diag:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install deps
-        run: pip install requests urllib3 --quiet
-
-      - name: Gate diagnostics
-        run: python diag_gates.py
-
-      - name: Commit report
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gate_diag.md
-          if git diff --staged --quiet; then echo "no report change"; exit 0; fi
-          git commit -m "chore: gate diagnostics [skip ci]"
-          git pull --rebase origin main || true
-          git push
