@@ -46,6 +46,12 @@ canvas{display:block;width:100%;border-radius:4px}
 .fbtn.on .fnum{background:#2f7d52;color:#fff}
 .fbadge{color:#787b86;font-size:11px}
 .fbtn.on .fbadge{color:#a9e3c4}
+/* 必选条件：始终点亮、不可取消 */
+.fbtn.req{border-color:#2f7d52;color:#7fd6a5;background:#12301f;cursor:default}
+.fbtn.req .fnum{background:#2f7d52;color:#fff}
+.fbtn.req .fbadge{color:#a9e3c4}
+.fbtn.req .lock{font-size:10px;color:#7fd6a5}
+.lockmsg{color:#f0b90b;font-size:11px;margin-left:6px}
 .fhint{color:#787b86;font-size:11px;margin:6px 0 12px;line-height:1.6}
 .hit{color:#9598a1}
 .hit b{color:#f0b90b}
@@ -63,11 +69,14 @@ canvas{display:block;width:100%;border-radius:4px}
   判定口径与推送一致（V2）：ADX&gt;20 · ATR/价 0.5-2% · 1d 结构定方向 · 贴日线关键位 ±1.5% · SRSI 同向极端 · 空间&gt;10%（1h/4h 结构仅展示）
 </div>
 
-<!-- 条件筛选：点亮的条件 = 必须通过（多选为「且」关系）；数字 = 优先级 -->
+<!-- 条件筛选：点亮的条件 = 必须通过（多选为「且」关系）；数字 = 优先级；
+     required:true 的条件为「必选」，始终满足且不可取消 -->
 <div class="filters" id="filters"></div>
 <div class="fhint">
-  数字 = 优先级（①最优先）：<b>排序先看「通过条件数」，多的靠前</b>；数量相同时再按优先级加权得分（①6分 ②5分 ③4分 ④3分 ⑤2分 ⑥1分），仍相同则看目标空间
+  数字 = 优先级（①最优先）：<b>排序先看「通过条件数」，多的靠前</b>；数量相同时再按优先级加权得分（①6分 ②5分 ③4分 ④3分 ⑤2分 ⑥1分），仍相同则看目标空间<br>
+  <b>④空间&gt;10% · ⑤ADX&gt;20 · ⑥ATR区间 为必选</b>（始终满足，不可取消）；①②③ 可点击加入筛选
   <span class="hit">｜ 命中 <b id="hitv">-</b> / 共 <b id="totv">-</b></span>
+  <span class="lockmsg" id="lockmsg"></span>
 </div>
 
 <div id="app"></div>
@@ -78,18 +87,20 @@ const DIRMAP = { 1: '上行↑', '-1': '下行↓', 0: '横盘' };
 
 /* 六道门 + 优先级（数组顺序即优先级，weight 用于同门数时的加权排序）。
    优先级依据策略语义：先定方向，再找位置，再看触发与空间，最后是动能/波动这类「质量门」。
-   改优先级只需调整数组顺序（序号会自动重排）。 */
+   required:true = 必选条件（始终满足、页面上不可取消）。
+   改优先级/必选项只需调整本数组（序号、按钮、角标、排序都会自动跟随）。 */
 const GATES = [
   { key: 'dir1d', label: '1d方向', weight: 6, note: '日线结构定方向（横盘淘汰）' },
   { key: 'level', label: '贴关键位', weight: 5, note: '价格贴近日线 swing 高/低 ±1.5%' },
   { key: 'srsi', label: 'SRSI极端', weight: 4, note: '同向极端触发' },
-  { key: 'space', label: '空间>10%', weight: 3, note: '目标位到现价的空间' },
-  { key: 'adx', label: 'ADX>20', weight: 2, note: '1h 趋势动能' },
-  { key: 'atr', label: 'ATR区间', weight: 1, note: 'ATR/价 0.5-2%' }
+  { key: 'space', label: '空间>10%', weight: 3, note: '目标位到现价的空间', required: true },
+  { key: 'adx', label: 'ADX>20', weight: 2, note: '1h 趋势动能', required: true },
+  { key: 'atr', label: 'ATR区间', weight: 1, note: 'ATR/价 0.5-2%', required: true }
 ];
-const GATE_CNT = {};                 // 每道门通过多少币（用于按钮上的角标）
-const ACTIVE = new Set();            // 点亮的门 = 必须通过
-let DATA = null, COINS = [];
+const REQ_KEYS = GATES.filter(g => g.required).map(g => g.key);   // 必选门
+const GATE_CNT = {};                 // 每道门在「必选过滤后」通过多少币（按钮角标）
+const ACTIVE = new Set();            // 点亮的可选门 = 必须通过
+let DATA = null, COINS = [], BASE = [];   // BASE = 通过全部必选门的币（展示池）
 let io = null;
 const drawn = new Set();
 
@@ -299,7 +310,7 @@ function byPriority(a, b) {
     (b._fixed - a._fixed);
 }
 function visibleCoins() {
-  let list = COINS;
+  let list = BASE;                                   // 必选门已在 BASE 阶段过滤掉
   if (ACTIVE.size) list = list.filter(c => [...ACTIVE].every(k => c.gates && c.gates[k]));
   return list.slice().sort(byPriority);
 }
@@ -308,25 +319,40 @@ function buildFilters() {
   el.innerHTML = '';
   GATES.forEach((g, i) => {
     const b = document.createElement('button');
-    const on = ACTIVE.has(g.key);
-    b.className = 'fbtn' + (on ? ' on' : '');
+    const req = !!g.required;
+    const on = req || ACTIVE.has(g.key);
+    b.className = 'fbtn' + (on ? ' on' : '') + (req ? ' req' : '');
     b.dataset.gate = g.key;
-    b.title = `优先级 ${i + 1}（排序权重 ${g.weight}）· ${g.note}｜点击${on ? '取消' : '加入'}筛选`;
-    b.innerHTML = `<span class="fnum">${i + 1}</span>${g.label} <span class="fbadge">${GATE_CNT[g.key] || 0}</span>`;
-    b.onclick = () => toggleGate(g.key);
+    b.dataset.req = req ? '1' : '0';
+    b.title = `优先级 ${i + 1}（排序权重 ${g.weight}）· ${g.note}｜` +
+      (req ? '必选条件，始终满足' : `点击${on ? '取消' : '加入'}筛选`);
+    b.innerHTML = `<span class="fnum">${i + 1}</span>${g.label}` +
+      (req ? ' <span class="lock">必</span>' : '') +
+      ` <span class="fbadge">${GATE_CNT[g.key] || 0}</span>`;
+    b.onclick = () => req ? flashLock(`${i + 1}${g.label} 是必选条件，不可取消`) : toggleGate(g.key);
     el.appendChild(b);
   });
 }
+function flashLock(msg) {
+  const el = document.getElementById('lockmsg');
+  if (!el) return;
+  el.textContent = '✕ ' + msg;
+  clearTimeout(flashLock._t);
+  flashLock._t = setTimeout(() => { el.textContent = ''; }, 1800);
+}
 function syncAllBtn() {
-  document.getElementById('flt').classList.toggle('on', ACTIVE.size === GATES.length);
+  const opt = GATES.filter(g => !g.required);
+  document.getElementById('flt').classList.toggle('on', opt.length > 0 && opt.every(g => ACTIVE.has(g.key)));
 }
 function toggleGate(key) {
   if (ACTIVE.has(key)) ACTIVE.delete(key); else ACTIVE.add(key);
   syncAllBtn(); buildFilters(); paint();
 }
+/* 「只看满足条件」= 对**可选**条件一键全选/全取消（必选门恒定满足） */
 function toggleAll() {
-  if (ACTIVE.size === GATES.length) ACTIVE.clear();
-  else GATES.forEach(g => ACTIVE.add(g.key));
+  const opt = GATES.filter(g => !g.required);
+  if (opt.every(g => ACTIVE.has(g.key))) opt.forEach(g => ACTIVE.delete(g.key));
+  else opt.forEach(g => ACTIVE.add(g.key));
   syncAllBtn(); buildFilters(); paint();
 }
 
@@ -338,9 +364,9 @@ function paint() {
   app.innerHTML = '';
   const list = visibleCoins();
   document.getElementById('hitv').textContent = list.length;
-  document.getElementById('totv').textContent = COINS.length;
+  document.getElementById('totv').textContent = BASE.length;
   if (!list.length) {
-    app.innerHTML = `<div class="msg">当前没有符合条件的币。<br>（共 ${COINS.length} 个；点上方条件按钮可取消筛选，或点「只看满足条件」一键全选）</div>`;
+    app.innerHTML = `<div class="msg">当前没有符合条件的币。<br>（必选门后剩 ${BASE.length} 个；点上方 ①②③ 可取消筛选，或点「只看满足条件」一键全选）</div>`;
     return;
   }
   list.forEach(render);
@@ -367,15 +393,14 @@ function load() {
         _fixed: fixed.indexOf(c.name) >= 0,
         _pushed: pushedNames.has(c.name)
       }));
-      // 预计算：通过门数 + 加权得分（用于排序）+ 每道门通过多少币（用于按钮角标）
+      // 预计算：通过门数 + 加权得分（排序用）；再按必选门筛出展示池 BASE，
+      // 按钮角标统计的是「BASE 内有多少通过该门」，这样数字才有参考意义。
       GATES.forEach(g => { GATE_CNT[g.key] = 0; });
-      COINS.forEach(c => {
-        c._pass = gatePass(c);
-        c._score = gateScore(c);
-        GATES.forEach(g => { if (c.gates && c.gates[g.key]) GATE_CNT[g.key]++; });
-      });
+      COINS.forEach(c => { c._pass = gatePass(c); c._score = gateScore(c); });
+      BASE = COINS.filter(c => REQ_KEYS.every(k => c.gates && c.gates[k]));
+      BASE.forEach(c => GATES.forEach(g => { if (c.gates[g.key]) GATE_CNT[g.key]++; }));
       const sigs = COINS.filter(c => c.signal).length;
-      gen.textContent = `生成于 ${d.generated_at} · ${COINS.length} 个币 · 满足全部条件 ${sigs} 个`;
+      gen.textContent = `生成于 ${d.generated_at} · 扫描 ${COINS.length} 个币 · 通过必选 ${BASE.length} 个 · 满足全部条件 ${sigs} 个`;
       buildFilters();
       syncAllBtn();
       const p = d.params || {};
