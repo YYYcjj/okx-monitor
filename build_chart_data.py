@@ -48,10 +48,15 @@ LIM = {"1D": BARS, "4H": BARS, "1H": BARS, "15m": BARS}
 
 
 def r5(x):
-    """5 位有效数字，压缩 JSON 体积（价格精度足够看图与算指标）。"""
+    """5 位有效数字，压缩 JSON 体积（价格精度足够看图与算指标）。
+
+    注意：OKX 接口返回的 OHLC 是**字符串**，必须先 float() 再格式化，
+    否则 f"{'123.4':.5g}" 会抛异常 → 被 fetch 的 except 吞掉 → 整轮空跑。
+    （2026-09-20 实战踩坑：100 币每币重试 4 次 ×0.5s，正好把 15 分钟作业撑爆）
+    """
     if x is None:
         return None
-    return float(f"{x:.5g}")
+    return float(f"{float(x):.5g}")
 
 
 def fetch(inst, bar, limit=LIM["1D"]):
@@ -69,7 +74,9 @@ def fetch(inst, bar, limit=LIM["1D"]):
                         for c in d["data"]]
                 rows.reverse()
                 return rows
-        except Exception:
+        except Exception as e:
+            # 打出异常：否则字段/类型问题会被静默重试吞掉（2026-09-20 空跑 15 分钟就是栽在这）
+            print(f"    fetch {inst} {bar} 第{_ + 1}次失败: {type(e).__name__}: {e}", flush=True)
             time.sleep(0.5)
         time.sleep(0.06)
     return None
@@ -201,7 +208,8 @@ def main():
     print(f"pushed today: {pushed}", flush=True)
 
     coins = []
-    for nm in names:
+    fails = 0
+    for i, nm in enumerate(names):
         c = build_coin(nm)
         if c:
             coins.append(c)
@@ -209,7 +217,11 @@ def main():
                   f"结构 {c['d1d']}/{c['d4h']}/{c['d1h']} 空间 {c['space_pct']} "
                   f"信号 {'★' if c['signal'] else '-'}", flush=True)
         else:
+            fails += 1
             print(f"  {nm}: 数据不足，跳过", flush=True)
+            # 快速失败：前 5 个全部取数失败，基本是接口/字段异常，别空跑到超时
+            if fails == i + 1 and fails >= 5:
+                raise SystemExit("前 5 个币全部取数失败，疑似接口或字段异常，提前终止")
         time.sleep(0.05)
 
     # 排序：信号优先 → 固定监控 → 有方向 → 空间大者在前
