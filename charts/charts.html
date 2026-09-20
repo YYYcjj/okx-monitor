@@ -67,11 +67,12 @@ function fmtP(p) {
   return p.toPrecision(4);
 }
 function fmtDate(ts) {
-  const d = new Date((ts + 8 * 3600) * 1000);
+  const d = new Date((ts + 8 * 3600) * 1000);          // 转 CST 显示
   const p = n => String(n).padStart(2, '0');
   return p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
 }
 
+/* ---------------- 自绘 K 线 + StochRSI ---------------- */
 const PAD = { t: 10, b: 16, l: 6, r: 54 };
 const PRICE_H = 186, GAP = 26, SRSI_H = 78;
 
@@ -99,6 +100,7 @@ function drawChart(cv) {
     return;
   }
 
+  // 关键位 / 目标（1D 视图画日线 swing），并纳入可视范围保证不会被裁掉
   const levels = [];
   if (tf === '1D') {
     (coin.sh1d || []).slice(-2).forEach(x => levels.push([x[1], '#d4a017', [5, 4]]));
@@ -116,6 +118,7 @@ function drawChart(cv) {
   const Y = p => yBot - (p - lo) / (hi - lo) * (yBot - yTop);
   const SY = v => syBot - Math.max(0, Math.min(100, v)) / 100 * (syBot - syTop);
 
+  // 价格网格 + 右轴刻度
   g.textAlign = 'left'; g.textBaseline = 'middle';
   for (let k = 0; k <= 4; k++) {
     const y = yTop + (yBot - yTop) * k / 4;
@@ -125,6 +128,7 @@ function drawChart(cv) {
     g.fillText(fmtP(hi - (hi - lo) * k / 4), x1 + 5, y);
   }
 
+  // 蜡烛
   const bw = Math.max(1, Math.min(9, (x1 - x0) / rows.length * 0.62));
   rows.forEach((r, i) => {
     const up = r[4] >= r[1];
@@ -135,6 +139,7 @@ function drawChart(cv) {
     g.fillRect(x - bw / 2, yt, bw, Math.max(1, yb - yt));
   });
 
+  // 关键位虚线 + 价位标注
   levels.forEach(([p, color, dash]) => {
     const y = Y(p);
     g.save(); g.setLineDash(dash); g.strokeStyle = color; g.lineWidth = 1;
@@ -144,12 +149,14 @@ function drawChart(cv) {
     g.fillText(fmtP(p), x1, y - 2);
   });
 
+  // 时间轴（4 个刻度）
   g.fillStyle = '#787b86'; g.textAlign = 'center'; g.textBaseline = 'top';
   for (let k = 0; k <= 3; k++) {
     const i = Math.min(rows.length - 1, Math.round((rows.length - 1) * k / 3));
     g.fillText(fmtDate(rows[i][0]), X(i), syBot + 3);
   }
 
+  // StochRSI 面板
   g.strokeStyle = '#2a2e39'; g.lineWidth = 1;
   g.beginPath(); g.moveTo(x0, syTop + 0.5); g.lineTo(x1, syTop + 0.5); g.stroke();
   g.beginPath(); g.moveTo(x0, syBot + 0.5); g.lineTo(x1, syBot + 0.5); g.stroke();
@@ -194,6 +201,7 @@ function setupObserver() {
   }, { rootMargin: '600px 0px' });
 }
 
+/* ---------------- 渲染卡片 ---------------- */
 function render(c) {
   const card = document.createElement('div');
   card.className = 'card' + (c.signal ? ' sig' : '');

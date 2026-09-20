@@ -2,6 +2,9 @@ name: Trend Candidate Watch
 
 on:
   schedule:
+    # 每 30 分钟扫描一次，有信号即推送（同日同币去重）
+    # 2026-09-08：原 */15 被 GitHub 节流到实际 4-5h 一次，改 30min 提高准时性
+    # 实际节拍由外部 cron-job 每 15 分钟 workflow_dispatch 驱动
     - cron: '*/30 * * * *'
   workflow_dispatch:
 
@@ -44,6 +47,14 @@ jobs:
             git push
           fi
 
+  # 走势图快照：用同一套 tw_calc 口径生成 charts_data.json，连同静态页发布到 gh-pages。
+  # 页面（零外部依赖，受限网络也能打开）：https://yyycjj.github.io/okx-monitor/charts.html
+  #
+  # 发布方式说明（2026-09-20 改）：gh-pages 每次都重建为**单个孤儿提交**后 force push。
+  #   ├ 原因：charts_data.json 约 1.5 MB 且每 15 分钟更新，若按常规追加提交，
+  #   │        仓库一天会膨胀上百 MB。
+  #   └ 副作用：gh-pages 的提交历史被覆盖；内容不丢——原有 index.html（另一套查看器）
+  #            每次都会被原样带回后再提交。
   charts:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -72,6 +83,7 @@ jobs:
 
           rm -rf /tmp/pub && mkdir -p /tmp/pub
 
+          # 保留 gh-pages 上原有的 index.html（另一套「OKX 数据查看器」，不能丢）
           if git fetch --depth=1 origin gh-pages && git show origin/gh-pages:index.html > /tmp/pub/index.html 2>/dev/null; then
             echo "kept existing index.html ($(wc -c < /tmp/pub/index.html) bytes)"
           else
