@@ -1,1 +1,302 @@
-PLACEHOLDER_HTML
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<title>TrendWatch 走势图</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;background:#0e0e10;color:#d1d4dc;padding:12px;font-size:13px}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px}
+h1{font-size:16px;font-weight:600}
+.sub{color:#787b86;font-size:11px}
+button{background:#1e222d;color:#d1d4dc;border:1px solid #363a45;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+button:hover{border-color:#5d606b}
+button.on{background:#2962ff;border-color:#2962ff;color:#fff}
+.note{color:#787b86;font-size:11px;margin:4px 0 12px;line-height:1.7}
+.card{background:#131722;border:1px solid #2a2e39;border-radius:8px;margin:10px 0;padding:10px}
+.card.sig{border-color:#6b4a12}
+.hd{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.nm{font-size:15px;font-weight:600}
+.px{font-size:13px;color:#b2b5be}
+.tag{font-size:11px;padding:1px 6px;border-radius:4px;font-weight:600}
+.t-long{background:#3d1d1e;color:#ef5350;border:1px solid #5c2b2b}
+.t-short{background:#14301f;color:#26a69a;border:1px solid #1f4a35}
+.t-kind{background:#1f2937;color:#85b7eb;border:1px solid #2c3b52}
+.t-sig{background:#4a3410;color:#f0b90b;border:1px solid #6b4a12}
+.t-fix{background:#1c1f26;color:#9598a1;border:1px solid #2a2e39}
+.metrics{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 6px;font-size:12px;color:#9598a1}
+.metrics b{color:#d1d4dc;font-weight:600}
+.gates{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.chip{font-size:11px;padding:1px 6px;border-radius:4px;background:#1c1f26;color:#787b86;border:1px solid #2a2e39}
+.chip.ok{background:#12281c;color:#4caf7d;border-color:#1f4a35}
+.chip.no{background:#2a1517;color:#e0676b;border-color:#4a2224}
+.tabs{display:flex;gap:4px;margin-bottom:6px}
+.tab{background:#1c1f26;border:1px solid #2a2e39;color:#9598a1;border-radius:5px;padding:2px 10px;font-size:12px;cursor:pointer}
+.tab.on{background:#2962ff;border-color:#2962ff;color:#fff}
+canvas{display:block;width:100%;border-radius:4px}
+.msg{padding:14px;color:#9598a1;font-size:12px;line-height:1.8}
+.err{color:#e0676b}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>TrendWatch 走势图</h1>
+  <span class="sub" id="gen">加载中…</span>
+  <button id="flt" onclick="toggleFilter()">只看满足条件</button>
+</div>
+<div class="note">
+  数据由云端每 15 分钟生成一次（快照，非实时）· 涨红跌绿 · 页面不依赖任何外部服务，受限网络也能打开<br>
+  金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>
+  判定口径与推送一致（V2）：ADX&gt;20 · ATR/价 0.5-2% · 1d 结构定方向 · 贴日线关键位 ±1.5% · SRSI 同向极端 · 空间&gt;10%（1h/4h 结构仅展示）
+</div>
+<div id="app"></div>
+
+<script>
+const UP = '#ef5350', DOWN = '#26a69a';
+const DIRMAP = { 1: '上行↑', '-1': '下行↓', 0: '横盘' };
+let DATA = null, COINS = [], ONLY_SIG = false;
+let io = null;
+const drawn = new Set();
+
+function fmtP(p) {
+  if (p >= 1000) return p.toFixed(1);
+  if (p >= 1) return p.toFixed(2);
+  if (p >= 0.01) return p.toFixed(4);
+  return p.toPrecision(4);
+}
+function fmtDate(ts) {
+  const d = new Date((ts + 8 * 3600) * 1000);
+  const p = n => String(n).padStart(2, '0');
+  return p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+}
+
+const PAD = { t: 10, b: 16, l: 6, r: 54 };
+const PRICE_H = 186, GAP = 26, SRSI_H = 78;
+
+function drawChart(cv) {
+  const coin = cv._coin, tf = cv._tf || '1D';
+  const rows = (tf === '1D' ? coin.d1 : tf === '4H' ? coin.h4 : coin.h1) || [];
+  const vals = (tf === '1D' ? coin.srsi1d : coin.srsi1h) || [];
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = Math.max(200, cv.clientWidth || cv.parentElement.clientWidth || 320);
+  const cssH = PAD.t + PRICE_H + GAP + SRSI_H + PAD.b;
+  cv.width = Math.round(cssW * dpr); cv.height = Math.round(cssH * dpr);
+  cv.style.height = cssH + 'px';
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#131722'; g.fillRect(0, 0, cssW, cssH);
+  g.font = '10px -apple-system,sans-serif';
+
+  const x0 = PAD.l, x1 = cssW - PAD.r;
+  const yTop = PAD.t, yBot = PAD.t + PRICE_H;
+  const syTop = yBot + GAP, syBot = syTop + SRSI_H;
+
+  if (!rows.length) {
+    g.fillStyle = '#787b86'; g.textAlign = 'center';
+    g.fillText('无该周期数据', cssW / 2, yBot / 2);
+    return;
+  }
+
+  const levels = [];
+  if (tf === '1D') {
+    (coin.sh1d || []).slice(-2).forEach(x => levels.push([x[1], '#d4a017', [5, 4]]));
+    (coin.sl1d || []).slice(-2).forEach(x => levels.push([x[1], '#378add', [5, 4]]));
+  }
+  if (coin.target) levels.push([coin.target, '#9c6ade', [2, 3]]);
+
+  let lo = Infinity, hi = -Infinity;
+  rows.forEach(r => { if (r[3] < lo) lo = r[3]; if (r[2] > hi) hi = r[2]; });
+  levels.forEach(([p]) => { if (p < lo) lo = p; if (p > hi) hi = p; });
+  const pad = (hi - lo) * 0.06 || Math.abs(hi) * 0.01 || 1;
+  lo -= pad; hi += pad;
+
+  const X = i => x0 + (x1 - x0) * (i + 0.5) / rows.length;
+  const Y = p => yBot - (p - lo) / (hi - lo) * (yBot - yTop);
+  const SY = v => syBot - Math.max(0, Math.min(100, v)) / 100 * (syBot - syTop);
+
+  g.textAlign = 'left'; g.textBaseline = 'middle';
+  for (let k = 0; k <= 4; k++) {
+    const y = yTop + (yBot - yTop) * k / 4;
+    g.strokeStyle = '#1e222d'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x0, y + 0.5); g.lineTo(x1, y + 0.5); g.stroke();
+    g.fillStyle = '#787b86';
+    g.fillText(fmtP(hi - (hi - lo) * k / 4), x1 + 5, y);
+  }
+
+  const bw = Math.max(1, Math.min(9, (x1 - x0) / rows.length * 0.62));
+  rows.forEach((r, i) => {
+    const up = r[4] >= r[1];
+    g.strokeStyle = g.fillStyle = up ? UP : DOWN;
+    const x = Math.round(X(i)) + 0.5;
+    g.beginPath(); g.moveTo(x, Y(r[2])); g.lineTo(x, Y(r[3])); g.stroke();
+    const yt = Y(Math.max(r[1], r[4])), yb = Y(Math.min(r[1], r[4]));
+    g.fillRect(x - bw / 2, yt, bw, Math.max(1, yb - yt));
+  });
+
+  levels.forEach(([p, color, dash]) => {
+    const y = Y(p);
+    g.save(); g.setLineDash(dash); g.strokeStyle = color; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x0, y + 0.5); g.lineTo(x1, y + 0.5); g.stroke();
+    g.restore();
+    g.fillStyle = color; g.textAlign = 'right'; g.textBaseline = 'bottom';
+    g.fillText(fmtP(p), x1, y - 2);
+  });
+
+  g.fillStyle = '#787b86'; g.textAlign = 'center'; g.textBaseline = 'top';
+  for (let k = 0; k <= 3; k++) {
+    const i = Math.min(rows.length - 1, Math.round((rows.length - 1) * k / 3));
+    g.fillText(fmtDate(rows[i][0]), X(i), syBot + 3);
+  }
+
+  g.strokeStyle = '#2a2e39'; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(x0, syTop + 0.5); g.lineTo(x1, syTop + 0.5); g.stroke();
+  g.beginPath(); g.moveTo(x0, syBot + 0.5); g.lineTo(x1, syBot + 0.5); g.stroke();
+  [20, 80].forEach(v => {
+    const y = SY(v);
+    g.save(); g.setLineDash([4, 4]); g.strokeStyle = '#5d606b';
+    g.beginPath(); g.moveTo(x0, y + 0.5); g.lineTo(x1, y + 0.5); g.stroke(); g.restore();
+    g.fillStyle = '#787b86'; g.textAlign = 'right'; g.textBaseline = 'middle';
+    g.fillText(String(v), x0 + 20, y);
+  });
+  if (vals.length) {
+    const off = Math.max(0, rows.length - vals.length);
+    g.strokeStyle = '#2962ff'; g.lineWidth = 1.5;
+    g.beginPath();
+    vals.forEach((v, i) => {
+      const x = X(i + off), y = SY(v);
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.stroke();
+    const last = vals[vals.length - 1];
+    g.fillStyle = '#2962ff'; g.textAlign = 'left'; g.textBaseline = 'middle';
+    g.fillText('SRSI ' + last.toFixed(1), x1 + 5, SY(last));
+  }
+  g.fillStyle = '#787b86'; g.textAlign = 'left'; g.textBaseline = 'top';
+  g.fillText('StochRSI（' + (tf === '1D' ? '1日' : '1小时') + '）', x0 + 2, syTop + 4);
+}
+
+function scheduledDraw(cv) {
+  if (cv._raf) cancelAnimationFrame(cv._raf);
+  cv._raf = requestAnimationFrame(() => { cv._raf = 0; drawChart(cv); drawn.add(cv); });
+}
+function clearCanvas(cv) {
+  if (cv._raf) { cancelAnimationFrame(cv._raf); cv._raf = 0; }
+  drawn.delete(cv);
+  cv.width = 0; cv.height = 0;
+}
+
+function setupObserver() {
+  if (io) return;
+  io = new IntersectionObserver(es => {
+    es.forEach(e => { e.isIntersecting ? scheduledDraw(e.target) : clearCanvas(e.target); });
+  }, { rootMargin: '600px 0px' });
+}
+
+function render(c) {
+  const card = document.createElement('div');
+  card.className = 'card' + (c.signal ? ' sig' : '');
+  const dirTag = c.dir === '多' ? '<span class="tag t-long">多</span>'
+    : c.dir === '空' ? '<span class="tag t-short">空</span>'
+      : '<span class="tag t-fix">无方向</span>';
+  const sigTag = c.signal ? '<span class="tag t-sig">满足全部条件</span>' : '';
+  const fixTag = c._fixed ? '<span class="tag t-fix">固定监控</span>' : '';
+  const pushTag = c._pushed ? '<span class="tag t-sig">当日已推送</span>' : '';
+  const g = c.gates || {};
+  const chip = (label, ok) => `<span class="chip ${ok ? 'ok' : 'no'}">${label} ${ok ? '✓' : '✗'}</span>`;
+  card.innerHTML = `
+    <div class="hd">
+      <span class="nm">${c.name}</span><span class="px">${fmtP(c.price)}</span>
+      ${dirTag} ${c.kind ? `<span class="tag t-kind">${c.kind}</span>` : ''} ${sigTag} ${pushTag} ${fixTag}
+    </div>
+    <div class="metrics">
+      <span>SRSI 1d <b>${c.s1}</b> / 1h <b>${c.s1h}</b></span>
+      <span>ADX(1h) <b>${c.adx1h}</b></span>
+      <span>ATR/价 <b>${c.atr_pct}%</b></span>
+      <span>结构 1d <b>${DIRMAP[c.d1d]}</b> · 4h <b>${DIRMAP[c.d4h]}</b> · 1h <b>${DIRMAP[c.d1h]}</b> · 15m <b>${DIRMAP[c.d15m]}</b></span>
+      <span>目标 <b>${c.target ? fmtP(c.target) : '—'}</b> · 空间 <b>${c.space_pct === null ? '—' : c.space_pct + '%'}</b></span>
+    </div>
+    <div class="gates">
+      ${chip('ADX&gt;20', g.adx)}${chip('ATR区间', g.atr)}${chip('1d方向', g.dir1d)}
+      ${chip('贴关键位', g.level)}${chip('SRSI极端', g.srsi)}${chip('空间&gt;10%', g.space)}
+    </div>
+    <div class="tabs">
+      <button class="tab on" data-tf="1D">1D</button>
+      <button class="tab" data-tf="4H">4H</button>
+      <button class="tab" data-tf="1H">1H</button>
+    </div>
+    <canvas></canvas>`;
+  document.getElementById('app').appendChild(card);
+
+  const cv = card.querySelector('canvas');
+  cv._coin = c; cv._tf = '1D';
+  card.querySelectorAll('.tab').forEach(b => b.onclick = () => {
+    card.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === b));
+    cv._tf = b.dataset.tf;
+    if (cv.width) drawChart(cv);
+  });
+  setupObserver();
+  io.observe(cv);
+}
+
+function paint() {
+  const app = document.getElementById('app');
+  if (io) { io.disconnect(); io = null; }
+  app.querySelectorAll('canvas').forEach(clearCanvas);
+  drawn.clear();
+  app.innerHTML = '';
+  const list = ONLY_SIG ? COINS.filter(c => c.signal) : COINS;
+  if (!list.length) {
+    app.innerHTML = `<div class="msg">当前没有满足全部条件的币。<br>（共 ${COINS.length} 个；可点「只看满足条件」切换回全部）</div>`;
+    return;
+  }
+  list.forEach(render);
+}
+
+function toggleFilter() {
+  ONLY_SIG = !ONLY_SIG;
+  document.getElementById('flt').classList.toggle('on', ONLY_SIG);
+  paint();
+}
+
+let rt = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(rt);
+  rt = setTimeout(() => [...drawn].forEach(cv => { if (cv.isConnected && cv.width) drawChart(cv); }), 200);
+});
+
+function load() {
+  const gen = document.getElementById('gen');
+  const app = document.getElementById('app');
+  gen.textContent = '加载中…';
+  app.innerHTML = '<div class="msg">读取 charts_data.json…</div>';
+  fetch('charts_data.json?t=' + Date.now())
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => {
+      DATA = d;
+      const fixed = d.fixed || [];
+      const pushedNames = new Set((d.pushed_today || []).map(k => k.split('|')[0]));
+      COINS = (d.coins || []).map(c => Object.assign({}, c, {
+        _fixed: fixed.indexOf(c.name) >= 0,
+        _pushed: pushedNames.has(c.name)
+      }));
+      const sigs = COINS.filter(c => c.signal).length;
+      gen.textContent = `生成于 ${d.generated_at} · ${COINS.length} 个币 · 满足全部条件 ${sigs} 个`;
+      const p = d.params || {};
+      document.querySelector('.note').innerHTML =
+        `数据由云端每 15 分钟生成一次（快照，非实时）· 涨红跌绿 · 页面不依赖任何外部服务，受限网络也能打开<br>` +
+        `金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>` +
+        `判定口径与推送一致（V2）：ADX&gt;${p.ADX} · ATR/价 ${p.ATR[0]}-${p.ATR[1]}% · 1d 结构定方向 · ` +
+        `贴日线关键位 ±${p.LEVEL_PCT}% · SRSI 同向极端 · 空间&gt;${p.SPACE_MIN}%（1h/4h 结构仅展示）`;
+      paint();
+    })
+    .catch(e => {
+      gen.textContent = '数据加载失败';
+      app.innerHTML = `<div class="msg err">charts_data.json 读取失败：${e.message}<br>（等云端 workflow 第一次生成数据后刷新）</div>`;
+    });
+}
+load();
+</script>
+</body>
+</html>

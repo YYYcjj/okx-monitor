@@ -1,1 +1,91 @@
-PLACEHOLDER_WF
+name: Trend Candidate Watch
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: trendwatch-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests urllib3 --quiet
+
+      - name: Run trend candidate scanner
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN || '' }}
+        run: python scan_trend.py
+
+      - name: Commit dedup state
+        if: success()
+        run: |
+          if [ -f .need_commit ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add pushed_state.json
+            git commit -m "chore: update trendwatch dedup state [skip ci]" || echo "nothing to commit"
+            git push
+          fi
+
+  charts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests urllib3 --quiet
+
+      - name: Build chart data
+        run: python build_chart_data.py
+
+      - name: Publish to gh-pages
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          rm -rf /tmp/pub && mkdir -p /tmp/pub
+
+          if git fetch --depth=1 origin gh-pages && git show origin/gh-pages:index.html > /tmp/pub/index.html 2>/dev/null; then
+            echo "kept existing index.html ($(wc -c < /tmp/pub/index.html) bytes)"
+          else
+            rm -f /tmp/pub/index.html
+            echo "no existing index.html on gh-pages"
+          fi
+
+          cp charts/charts.html /tmp/pub/charts.html
+          cp charts_data.json /tmp/pub/charts_data.json
+          du -h /tmp/pub/*
+
+          cd /tmp/pub
+          git init -q -b gh-pages
+          git add -A
+          git commit -q -m "chore: publish trend charts [skip ci]"
+          git push -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+          echo "published to gh-pages"
