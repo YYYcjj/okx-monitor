@@ -66,7 +66,7 @@ canvas{display:block;width:100%;border-radius:4px}
 <!-- 条件筛选：点亮的条件 = 必须通过（多选为「且」关系）；数字 = 优先级 -->
 <div class="filters" id="filters"></div>
 <div class="fhint">
-  数字 = 优先级（①最优先）：排序先按「通过条件的加权得分」（①6分 ②5分 ③4分 ④3分 ⑤2分 ⑥1分），同分再看目标空间
+  数字 = 优先级（①最优先）：<b>排序先看「通过条件数」，多的靠前</b>；数量相同时再按优先级加权得分（①6分 ②5分 ③4分 ④3分 ⑤2分 ⑥1分），仍相同则看目标空间
   <span class="hit">｜ 命中 <b id="hitv">-</b> / 共 <b id="totv">-</b></span>
 </div>
 
@@ -76,7 +76,7 @@ canvas{display:block;width:100%;border-radius:4px}
 const UP = '#ef5350', DOWN = '#26a69a';
 const DIRMAP = { 1: '上行↑', '-1': '下行↓', 0: '横盘' };
 
-/* 六道门 + 优先级（数组顺序即优先级，weight 用于排序加权）。
+/* 六道门 + 优先级（数组顺序即优先级，weight 用于同门数时的加权排序）。
    优先级依据策略语义：先定方向，再找位置，再看触发与空间，最后是动能/波动这类「质量门」。
    改优先级只需调整数组顺序（序号会自动重排）。 */
 const GATES = [
@@ -282,14 +282,19 @@ function render(c) {
   io.observe(cv);
 }
 
-/* ---------------- 条件筛选 + 优先级排序 ---------------- */
+/* ---------------- 条件筛选 + 排序 ---------------- */
 function gateScore(c) {
   let s = 0;
   GATES.forEach(g => { if (c.gates && c.gates[g.key]) s += g.weight; });
   return s;
 }
+function gatePass(c) {
+  return GATES.filter(g => c.gates && c.gates[g.key]).length;
+}
+/* 排序：① 通过条件数多者靠前（主键）② 同数量时按优先级加权得分 ③ 再看目标空间 ④ 固定监控币 */
 function byPriority(a, b) {
-  return (b._score - a._score) ||
+  return (b._pass - a._pass) ||
+    (b._score - a._score) ||
     (((b.space_pct === null ? -999 : b.space_pct)) - ((a.space_pct === null ? -999 : a.space_pct))) ||
     (b._fixed - a._fixed);
 }
@@ -362,9 +367,10 @@ function load() {
         _fixed: fixed.indexOf(c.name) >= 0,
         _pushed: pushedNames.has(c.name)
       }));
-      // 预计算：加权得分（用于优先级排序）+ 每道门通过多少币（用于按钮角标）
+      // 预计算：通过门数 + 加权得分（用于排序）+ 每道门通过多少币（用于按钮角标）
       GATES.forEach(g => { GATE_CNT[g.key] = 0; });
       COINS.forEach(c => {
+        c._pass = gatePass(c);
         c._score = gateScore(c);
         GATES.forEach(g => { if (c.gates && c.gates[g.key]) GATE_CNT[g.key]++; });
       });
