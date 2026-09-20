@@ -3,7 +3,8 @@
 # 2026-09-10：classify 移除 1h/1d 结构共振 + 插针门
 # 2026-09-13：classify 新增目标空间 >10% 门
 # 2026-09-14：classify 新增 4h 结构同向门
-# 2026-09-19：还原「1 日找机会 + 1 小时同向确认」：撤销 4h 门、恢复 1h 与 1d 共振（空间门保留）
+# 2026-09-19：撤销 4h 门、恢复 1h 与 1d 共振
+# 2026-09-20：按用户选择回到 V2 口径——撤销 1h 同向门（1h/4h 结构仅展示），保留空间 >10% 门
 from tw_conf import *
 
 def calc_rsi(closes, period=14):
@@ -142,7 +143,7 @@ def structure_dir(highs, lows, p=SWING_P, min_pct=0.003):
     上行(1) = 最近两个 swing high 走高(HH) 且 最近两个 swing low 走高(HL)，且两组差值均 > min_pct*价格量级
     下行(-1)= 最近两个 swing high 走低(LH) 且 最近两个 swing low 走低(LL)，且两组差值均 > min_pct*价格量级
     否则(结构混合/样本不足/摆幅不足) = 0（横盘，不计入方向）
-    注：1d 结构找机会并定方向，1h 结构需与信号方向同向（2026-09-19 恢复 1h/1d 共振）；15m 结构仅展示。"""
+    注：1d 结构找机会并定方向（2026-09-20 起 1h/4h 结构仅展示、不参与过滤）。"""
     sh, sl = find_swings(highs, lows, p)
     if len(sh) < 2 or len(sl) < 2:
         return 0
@@ -169,36 +170,31 @@ def near_key_level(price, levels, pct=NEAR_LEVEL_PCT):
     return False
 
 
-def classify(s1, s1h, adx1h, atr_ratio, d1h, d1d,
+def classify(s1, s1h, adx1h, atr_ratio, d1d,
              price, sh1d, sl1d):
-    """统一顺势信号（2026-09-19：还原「1 日找机会 + 1 小时同向确认」；空间 >10% 门保留）:
-    核心：在日线关键位置找机会（1d 结构定方向），1h 结构必须与信号方向一致（共振确认），
-          且 SRSI 同向极端、目标空间 >10%。
-    两类触发（方向均由 1d 结构决定）：
+    """统一顺势信号（2026-09-20 回到 V2 口径：1d 结构定方向 + 目标空间 >10%；1h/4h 结构不参与过滤）:
+    核心：在日线关键位置找机会（1d 结构定方向）+ SRSI 同向极端 + 目标空间 >10%。
+    两类触发（方向由 1d 结构决定）：
       回调：1d SRSI 极端（1d 多结构+SRSI<20→多；1d 空结构+SRSI>80→空）
       趋势：1h SRSI 极端（1h SRSI<20→多；1h SRSI>80→空）
     共用要求（不满足即剔除）：
       - 方向 = 1d 结构方向（横盘 0 淘汰）
-      - 1h 结构方向 == 信号方向（1h 与 1d 共振同向；1h 横盘(0)或反向淘汰）
       - 价格贴近日线关键位：做多近 swing low、做空近 swing high，距离 <= NEAR_LEVEL_PCT(±1.5%)
       - 1h ADX>20、ATR/价 在 (ATR_MIN_RATIO=0.5%, ATR_MAX_RATIO=2%)
       - 目标空间 > MIN_SPACE_PCT(10%)（2026-09-13 新增）：目标=最近日线 swing 高/低
     保险：任一侧反向极端即剔除（做多时 1h/1d 均不>80；做空时均不<20）
-    说明：4h 结构不参与过滤（2026-09-14 曾加入、2026-09-19 撤销）；插针门自 2026-09-10 起停用。
+    说明：1h/4h 结构仅供展示、不参与过滤（2026-09-19 曾恢复 1h 同向门，2026-09-20 按用户选择撤销，回到 V2）；
+          插针门自 2026-09-10 起停用。
     返回 (类型, 方向, 附加信息dict) 或 None。"""
     if adx1h < ADX_THRESHOLD:
         return None
     # 波动门：ATR/价 在 (0.5%, 2%)
     if not (ATR_MIN_RATIO < atr_ratio < ATR_MAX_RATIO):
         return None
-    # 方向由 1d 结构决定（横盘 0 淘汰）
+    # 方向由 1d 结构决定（横盘 0 淘汰）；此处不要求 1h/4h 同向（V2 口径）
     if d1d == 0:
         return None
     dirn = d1d  # 信号方向 = 1d 结构方向
-
-    # 1h 同向门（2026-09-19 恢复）：1 日找机会、1 小时定方向，1h 必须与信号方向一致
-    if d1h != dirn:
-        return None
 
     # 关键位置：做多贴近日线 swing low（支撑），做空贴近日线 swing high（阻力）
     if dirn == 1:
