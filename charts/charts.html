@@ -38,25 +38,58 @@ button.on{background:#2962ff;border-color:#2962ff;color:#fff}
 canvas{display:block;width:100%;border-radius:4px}
 .msg{padding:14px;color:#9598a1;font-size:12px;line-height:1.8}
 .err{color:#e0676b}
+.filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 0}
+.fbtn{display:inline-flex;align-items:center;gap:5px;background:#1c1f26;border:1px solid #2a2e39;color:#9598a1;border-radius:6px;padding:3px 9px;font-size:12px;cursor:pointer}
+.fbtn:hover{border-color:#5d606b}
+.fbtn.on{background:#12301f;border-color:#2f7d52;color:#7fd6a5}
+.fnum{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:#2a2e39;color:#c8cbd3;font-size:10px;font-weight:700}
+.fbtn.on .fnum{background:#2f7d52;color:#fff}
+.fbadge{color:#787b86;font-size:11px}
+.fbtn.on .fbadge{color:#a9e3c4}
+.fhint{color:#787b86;font-size:11px;margin:6px 0 12px;line-height:1.6}
+.hit{color:#9598a1}
+.hit b{color:#f0b90b}
 </style>
 </head>
 <body>
 <div class="top">
   <h1>TrendWatch 走势图</h1>
   <span class="sub" id="gen">加载中…</span>
-  <button id="flt" onclick="toggleFilter()">只看满足条件</button>
+  <button id="flt" onclick="toggleAll()">只看满足条件</button>
 </div>
 <div class="note">
   数据由云端每 15 分钟生成一次（快照，非实时）· 涨红跌绿 · 页面不依赖任何外部服务，受限网络也能打开<br>
   金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>
   判定口径与推送一致（V2）：ADX&gt;20 · ATR/价 0.5-2% · 1d 结构定方向 · 贴日线关键位 ±1.5% · SRSI 同向极端 · 空间&gt;10%（1h/4h 结构仅展示）
 </div>
+
+<!-- 条件筛选：点亮的条件 = 必须通过（多选为「且」关系）；数字 = 优先级 -->
+<div class="filters" id="filters"></div>
+<div class="fhint">
+  数字 = 优先级（①最优先）：排序先按「通过条件的加权得分」（①6分 ②5分 ③4分 ④3分 ⑤2分 ⑥1分），同分再看目标空间
+  <span class="hit">｜ 命中 <b id="hitv">-</b> / 共 <b id="totv">-</b></span>
+</div>
+
 <div id="app"></div>
 
 <script>
 const UP = '#ef5350', DOWN = '#26a69a';
 const DIRMAP = { 1: '上行↑', '-1': '下行↓', 0: '横盘' };
-let DATA = null, COINS = [], ONLY_SIG = false;
+
+/* 六道门 + 优先级（数组顺序即优先级，weight 用于排序加权）。
+   优先级依据策略语义：先定方向，再找位置，再看触发与空间，最后是动能/波动这类「质量门」。
+   改优先级只需调整数组顺序（序号会自动重排）。 */
+const GATES = [
+  { key: 'dir1d', label: '1d方向', weight: 6, note: '日线结构定方向（横盘淘汰）' },
+  { key: 'level', label: '贴关键位', weight: 5, note: '价格贴近日线 swing 高/低 ±1.5%' },
+  { key: 'srsi', label: 'SRSI极端', weight: 4, note: '同向极端触发' },
+  { key: 'space', label: '空间>10%', weight: 3, note: '目标位到现价的空间' },
+  { key: 'adx', label: 'ADX>20', weight: 2, note: '1h 趋势动能' },
+  { key: 'atr', label: 'ATR区间', weight: 1, note: 'ATR/价 0.5-2%' }
+];
+const GATE_CNT = {};                 // 每道门通过多少币（用于按钮上的角标）
+const ACTIVE = new Set();            // 点亮的门 = 必须通过
+let DATA = null, COINS = [];
 let io = null;
 const drawn = new Set();
 
@@ -212,6 +245,7 @@ function render(c) {
   const fixTag = c._fixed ? '<span class="tag t-fix">固定监控</span>' : '';
   const pushTag = c._pushed ? '<span class="tag t-sig">当日已推送</span>' : '';
   const g = c.gates || {};
+  const passCnt = GATES.filter(x => g[x.key]).length;
   const chip = (label, ok) => `<span class="chip ${ok ? 'ok' : 'no'}">${label} ${ok ? '✓' : '✗'}</span>`;
   card.innerHTML = `
     <div class="hd">
@@ -224,10 +258,10 @@ function render(c) {
       <span>ATR/价 <b>${c.atr_pct}%</b></span>
       <span>结构 1d <b>${DIRMAP[c.d1d]}</b> · 4h <b>${DIRMAP[c.d4h]}</b> · 1h <b>${DIRMAP[c.d1h]}</b> · 15m <b>${DIRMAP[c.d15m]}</b></span>
       <span>目标 <b>${c.target ? fmtP(c.target) : '—'}</b> · 空间 <b>${c.space_pct === null ? '—' : c.space_pct + '%'}</b></span>
+      <span>通过 <b>${passCnt}/${GATES.length}</b> 门 · 加权 <b>${c._score}</b></span>
     </div>
     <div class="gates">
-      ${chip('ADX&gt;20', g.adx)}${chip('ATR区间', g.atr)}${chip('1d方向', g.dir1d)}
-      ${chip('贴关键位', g.level)}${chip('SRSI极端', g.srsi)}${chip('空间&gt;10%', g.space)}
+      ${GATES.map(x => chip(`${x.label}`, g[x.key])).join('')}
     </div>
     <div class="tabs">
       <button class="tab on" data-tf="1D">1D</button>
@@ -248,24 +282,63 @@ function render(c) {
   io.observe(cv);
 }
 
+/* ---------------- 条件筛选 + 优先级排序 ---------------- */
+function gateScore(c) {
+  let s = 0;
+  GATES.forEach(g => { if (c.gates && c.gates[g.key]) s += g.weight; });
+  return s;
+}
+function byPriority(a, b) {
+  return (b._score - a._score) ||
+    (((b.space_pct === null ? -999 : b.space_pct)) - ((a.space_pct === null ? -999 : a.space_pct))) ||
+    (b._fixed - a._fixed);
+}
+function visibleCoins() {
+  let list = COINS;
+  if (ACTIVE.size) list = list.filter(c => [...ACTIVE].every(k => c.gates && c.gates[k]));
+  return list.slice().sort(byPriority);
+}
+function buildFilters() {
+  const el = document.getElementById('filters');
+  el.innerHTML = '';
+  GATES.forEach((g, i) => {
+    const b = document.createElement('button');
+    const on = ACTIVE.has(g.key);
+    b.className = 'fbtn' + (on ? ' on' : '');
+    b.dataset.gate = g.key;
+    b.title = `优先级 ${i + 1}（排序权重 ${g.weight}）· ${g.note}｜点击${on ? '取消' : '加入'}筛选`;
+    b.innerHTML = `<span class="fnum">${i + 1}</span>${g.label} <span class="fbadge">${GATE_CNT[g.key] || 0}</span>`;
+    b.onclick = () => toggleGate(g.key);
+    el.appendChild(b);
+  });
+}
+function syncAllBtn() {
+  document.getElementById('flt').classList.toggle('on', ACTIVE.size === GATES.length);
+}
+function toggleGate(key) {
+  if (ACTIVE.has(key)) ACTIVE.delete(key); else ACTIVE.add(key);
+  syncAllBtn(); buildFilters(); paint();
+}
+function toggleAll() {
+  if (ACTIVE.size === GATES.length) ACTIVE.clear();
+  else GATES.forEach(g => ACTIVE.add(g.key));
+  syncAllBtn(); buildFilters(); paint();
+}
+
 function paint() {
   const app = document.getElementById('app');
   if (io) { io.disconnect(); io = null; }
   app.querySelectorAll('canvas').forEach(clearCanvas);
   drawn.clear();
   app.innerHTML = '';
-  const list = ONLY_SIG ? COINS.filter(c => c.signal) : COINS;
+  const list = visibleCoins();
+  document.getElementById('hitv').textContent = list.length;
+  document.getElementById('totv').textContent = COINS.length;
   if (!list.length) {
-    app.innerHTML = `<div class="msg">当前没有满足全部条件的币。<br>（共 ${COINS.length} 个；可点「只看满足条件」切换回全部）</div>`;
+    app.innerHTML = `<div class="msg">当前没有符合条件的币。<br>（共 ${COINS.length} 个；点上方条件按钮可取消筛选，或点「只看满足条件」一键全选）</div>`;
     return;
   }
   list.forEach(render);
-}
-
-function toggleFilter() {
-  ONLY_SIG = !ONLY_SIG;
-  document.getElementById('flt').classList.toggle('on', ONLY_SIG);
-  paint();
 }
 
 let rt = 0;
@@ -289,8 +362,16 @@ function load() {
         _fixed: fixed.indexOf(c.name) >= 0,
         _pushed: pushedNames.has(c.name)
       }));
+      // 预计算：加权得分（用于优先级排序）+ 每道门通过多少币（用于按钮角标）
+      GATES.forEach(g => { GATE_CNT[g.key] = 0; });
+      COINS.forEach(c => {
+        c._score = gateScore(c);
+        GATES.forEach(g => { if (c.gates && c.gates[g.key]) GATE_CNT[g.key]++; });
+      });
       const sigs = COINS.filter(c => c.signal).length;
       gen.textContent = `生成于 ${d.generated_at} · ${COINS.length} 个币 · 满足全部条件 ${sigs} 个`;
+      buildFilters();
+      syncAllBtn();
       const p = d.params || {};
       document.querySelector('.note').innerHTML =
         `数据由云端每 15 分钟生成一次（快照，非实时）· 涨红跌绿 · 页面不依赖任何外部服务，受限网络也能打开<br>` +
