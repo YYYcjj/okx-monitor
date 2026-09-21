@@ -30,14 +30,13 @@ import requests
 
 from tw_conf import (OKX, SWING_P, ADX_THRESHOLD, ATR_MIN_RATIO, ATR_MAX_RATIO,
                      SRSI_LOW, SRSI_HIGH, NEAR_LEVEL_PCT, MIN_SPACE_PCT,
-                     MIN_SWING_PCT_1H, MIN_SWING_PCT_1D,
+                     MIN_SWING_PCT_1H, MIN_SWING_PCT_1D, MIN_SWING_PCT_4H,
                      MIN_SWING_PCT_15M, STATE_FILE)
 from tw_calc import (calc_stoch_rsi_series, srsi_last, calc_atr, calc_adx,
                      structure_dir, find_swings, near_key_level)
 
-# 4h 结构在 V2 口径下**不参与过滤**（只用于页面展示），所以这个阈值不属于 tw_conf，
-# 若将来 4h 重新参与判定，应把它移回 tw_conf.py 并同步 scan_trend/classify。
-MIN_SWING_PCT_4H = 0.0075   # 4h 结构最小摆幅（相对价格，0.75%），取 1h(0.5%) 与 1d(1%) 之间
+# 注：4h 结构摆幅阈值 MIN_SWING_PCT_4H 原为**本文件局部定义**（当时 4h 不参与判定）；
+# 2026-09-21 「4H 型」信号启用后已回归 tw_conf.py，这里改为导入，避免两份定义分叉。
 
 
 FIXED = ["ORDI", "PUMP", "HUMA", "WLD", "APR", "BTC", "APT"]   # 固定监控币

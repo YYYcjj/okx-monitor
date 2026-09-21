@@ -10,6 +10,9 @@ STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pushed_st
 SWING_P = 5  # swing 判定左右窗口（根）
 MIN_SWING_PCT_15M = 0.003 # 15m 结构最小摆幅（相对价格，0.3%）——15m 方向共振标注用（2026-09-05 新增）
 MIN_SWING_PCT_1H = 0.005  # 1h 结构最小摆幅（相对价格，0.5%）——过滤噪声小波动（2026-09-01 由 0.3% 收紧至 0.5%）
+MIN_SWING_PCT_4H = 0.0075 # 4h 结构最小摆幅（相对价格，0.75%），取 1h(0.5%) 与 1d(1%) 之间
+                          # 2026-09-14 首次引入（4h 同向门），2026-09-19 门撤销时移除；
+                          # 2026-09-21 「4H 型」新信号重新启用（4h 结构定方向），故回归 tw_conf。
 MIN_SWING_PCT_1D = 0.01   # 1d 结构最小摆幅（相对价格，1%）——日线级：找机会 + 定方向（2026-09-19 恢复 1h 同向共振后，1d 仍是方向锚）
 TOP_N = 10                # 每日最多推送前 N 个（按信号极端度排序取最强），降低噪音（2026-09-05 新增）
 
@@ -18,6 +21,18 @@ SRSI_LOW = 20             # SRSI 低于此值为超卖
 SRSI_HIGH = 80            # SRSI 高于此值为超买
 NEAR_LEVEL_PCT = 0.015    # 价格贴近日线关键位：做多近 swing low 支撑 / 做空近 swing high 阻力，距离 <=1.5%（双向贴靠，2026-09-07 恢复 9/5 推送版）
 # CONFIRM_*（CHoCH 逆势 1h 确认）已于 2026-09-05 移除：系统改为纯顺势，1h 同向共振即确认，不再需要逆势突破确认。
+
+# ---- 「4H 型」信号（2026-09-21 新增的第二类推送，与 1d 型「回调/趋势」并列）----
+# 口径（固定条件与 1d 型完全一致，只在方向锚与位置上换成 4h；见 tw_calc.classify_4h）：
+#   固定（不变）：ADX(1h) > ADX_THRESHOLD ｜ ATR/价 ∈ (ATR_MIN_RATIO, ATR_MAX_RATIO)
+#                 ｜ 目标空间 > MIN_SPACE_PCT（目标取日线最近 swing 高/低）
+#   方向        ：4h 结构定方向，且 1h 结构必须同向（横盘 0 淘汰）
+#   关键位置    ：价格贴 4h 关键位 ±NEAR_LEVEL_PCT（多贴 4h swing low / 空贴 4h swing high）
+#   触发        ：4h SRSI 同向极端（多 < SRSI_LOW，空 > SRSI_HIGH）
+#   保险        ：1h SRSI 与 1d SRSI 均不得处于反向极端（多不 > SRSI_HIGH，空不 < SRSI_LOW）
+# 阈值全部复用上面既有的 SRSI / ATR / ADX / 空间 / NEAR_LEVEL_PCT 常量，不另设一份，
+# 只有 4h 结构的摆幅门单独用 MIN_SWING_PCT_4H。
+# 去重键与推送排序见 scan_trend.py（kind 记为「4H」）。
 
 # ---- 质量门阈值（沿用主策略/早期版既定标准，要求不变） ----
 ADX_PERIOD = 14

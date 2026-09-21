@@ -5,6 +5,7 @@
 # 2026-09-14：classify 新增 4h 结构同向门
 # 2026-09-19：撤销 4h 门、恢复 1h 与 1d 共振
 # 2026-09-20：按用户选择回到 V2 口径——撤销 1h 同向门（1h/4h 结构仅展示），保留空间 >10% 门
+# 2026-09-21：新增 classify_4h（「4H 型」第二类推送）——固定条件不变，方向锚与位置换成 4h
 from tw_conf import *
 
 def calc_rsi(closes, period=14):
@@ -234,6 +235,60 @@ def classify(s1, s1h, adx1h, atr_ratio, d1d,
         if s1h > SRSI_HIGH:                     # 趋势：1h 极端触发
             return _mk("趋势", "空", sl1d[-1][1] if sl1d else None)
         return None
+
+
+def classify_4h(s4h, s1, s1h, d4h, d1h, adx1h, atr_ratio,
+                price, sh4h, sl4h, sh1d, sl1d):
+    """**「4H 型」信号**（2026-09-21 新增的第二类推送，与 1d 型的「回调/趋势」并列）：
+    固定条件与 1d 型完全一致，只把「方向锚」和「关键位置」从日线换成 4h。
+
+    条件（须全部满足，任一不满足即淘汰）：
+      1) 固定门（不变）：1h ADX > ADX_THRESHOLD(20)；ATR/价 ∈ (ATR_MIN_RATIO, ATR_MAX_RATIO) = (0.5%, 2%)
+      2) 方向：4h 结构与 1h 结构同向且非横盘（**1h、4h 方向相同**），方向 = 4h 结构方向
+      3) 4h 关键位置：做多贴近 4h swing low（支撑）、做空贴近 4h swing high（阻力），距离 <= NEAR_LEVEL_PCT(±1.5%)
+      4) 4h SRSI 同向极端：做多 s4h < SRSI_LOW(20)；做空 s4h > SRSI_HIGH(80)
+      5) 1h SRSI 不在反向极值：做多 s1h <= SRSI_HIGH；做空 s1h >= SRSI_LOW
+      6) 1d SRSI 不在反向极值：做多 s1  <= SRSI_HIGH；做空 s1  >= SRSI_LOW
+      7) 空间门（不变）：目标取日线最近 swing 高(多)/低(空)，空间 > MIN_SPACE_PCT(10%)
+
+    s4h 为 None（4h 数据不足）时调用方不应调用本函数。
+    返回 ("4H", "多"/"空", 附加信息dict) 或 None。
+    """
+    # 固定门（与 1d 型共用，口径不变）
+    if adx1h < ADX_THRESHOLD:
+        return None
+    if not (ATR_MIN_RATIO < atr_ratio < ATR_MAX_RATIO):
+        return None
+    # 方向：4h 定方向，1h 必须同向
+    if d4h == 0 or d1h != d4h:
+        return None
+    dirn = d4h
+
+    if dirn == 1:
+        if not near_key_level(price, [p for _, p in sl4h[-2:]]):   # 贴 4h 支撑
+            return None
+        if s4h >= SRSI_LOW:                                        # 4h 未进入同向极端
+            return None
+        if s1h > SRSI_HIGH or s1 > SRSI_HIGH:                      # 1h / 1d 反向极端（超买）保险
+            return None
+    else:
+        if not near_key_level(price, [p for _, p in sh4h[-2:]]):   # 贴 4h 阻力
+            return None
+        if s4h <= SRSI_HIGH:                                       # 4h 未进入同向极端
+            return None
+        if s1h < SRSI_LOW or s1 < SRSI_LOW:                        # 1h / 1d 反向极端（超卖）保险
+            return None
+
+    # 目标与空间门（与 1d 型一致：目标取日线 swing，空间 > 10%）
+    target = (sh1d[-1][1] if sh1d else None) if dirn == 1 else (sl1d[-1][1] if sl1d else None)
+    if not target or price <= 0:
+        return None
+    sp = (target - price) / price if dirn == 1 else (price - target) / price
+    if sp * 100.0 <= MIN_SPACE_PCT:
+        return None
+    return ("4H", "多" if dirn == 1 else "空",
+            {"tgt": target, "space_pct": sp * 100.0,
+             "space_atr": sp / atr_ratio if atr_ratio > 0 else None})
 
 
 def fmt_p(p, inst):
