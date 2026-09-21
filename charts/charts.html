@@ -16,15 +16,17 @@ button:hover{border-color:#5d606b}
 button.on{background:#2962ff;border-color:#2962ff;color:#fff}
 .note{color:#787b86;font-size:11px;margin:4px 0 12px;line-height:1.7}
 .card{background:#131722;border:1px solid #2a2e39;border-radius:8px;margin:10px 0;padding:10px}
-.card.sig{border-color:#6b4a12}
+.card.sig{border-color:#3d2f5c}          /* 1d 型信号：紫边框（与 4H 型对调后） */
 .hd{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .nm{font-size:15px;font-weight:600}
 .px{font-size:13px;color:#b2b5be}
 .tag{font-size:11px;padding:1px 6px;border-radius:4px;font-weight:600}
-.t-long{background:#3d1d1e;color:#ef5350;border:1px solid #5c2b2b}
-.t-short{background:#14301f;color:#26a69a;border:1px solid #1f4a35}
+/* 涨跌配色：2026-09-21 按用户要求改为 **涨绿跌红**（多=绿、空=红），与推送卡片一致 */
+.t-long{background:#14301f;color:#26a69a;border:1px solid #1f4a35}
+.t-short{background:#3d1d1e;color:#ef5350;border:1px solid #5c2b2b}
 .t-kind{background:#1f2937;color:#85b7eb;border:1px solid #2c3b52}
-.t-sig{background:#4a3410;color:#f0b90b;border:1px solid #6b4a12}
+/* 1d 型（回调/趋势）主色：**紫**（2026-09-21 按用户要求与 4H 型对调，原为金/黄） */
+.t-sig{background:#221a33;color:#b18ff0;border:1px solid #3d2f5c}
 .t-fix{background:#1c1f26;color:#9598a1;border:1px solid #2a2e39}
 .metrics{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 6px;font-size:12px;color:#9598a1}
 .metrics b{color:#d1d4dc;font-weight:600}
@@ -52,18 +54,18 @@ canvas{display:block;width:100%;border-radius:4px}
 .fbtn.req .fbadge{color:#a9e3c4}
 .fbtn.req .lock{font-size:10px;color:#7fd6a5}
 .lockmsg{color:#f0b90b;font-size:11px;margin-left:6px}
-/* ---- 「4H 型」专属样式（2026-09-21 新增）：紫色系，与 1d 型的蓝/金色区分 ---- */
-.tag.t-4h{background:#221a33;color:#b18ff0;border:1px solid #3d2f5c}
-.card.sig4{border-color:#5a3f8a}
-.card.sig4.sig{border-color:#6b4a12}      /* 两类同时命中时，保留 1d 型的金色边框 */
+/* ---- 「4H 型」专属样式（2026-09-21 新增）：**金色系**（与 1d 型的紫色对调，按用户要求） ---- */
+.tag.t-4h{background:#4a3410;color:#f0b90b;border:1px solid #6b4a12}
+.card.sig4{border-color:#6b4a12}
+.card.sig4.sig{border-color:#6b4a12}      /* 两类同时命中时，边框取 4H 型的金色 */
 .g4row{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:0 0 8px}
-.g4head{font-size:11px;font-weight:600;color:#8a7bb8;margin-right:2px}
-.chip.g4{background:#1b1626;border-color:#3a2d55}
-.chip.g4.ok{background:#241a38;color:#b18ff0;border-color:#4a3670}
+.g4head{font-size:11px;font-weight:600;color:#c0a352;margin-right:2px}
+.chip.g4{background:#1f1a10;border-color:#3d3218}
+.chip.g4.ok{background:#332a10;color:#e8c25c;border-color:#5c4a16}
 .fbtn.f4{padding-left:8px}
-.fbtn.on.f4{background:#241a38;border-color:#4a3670;color:#b18ff0}
-.fbtn.on.f4 .fbadge{color:#b18ff0}
-.f4tag{font-size:11px;font-weight:600;color:#8a7bb8;margin:0 2px 0 4px}
+.fbtn.on.f4{background:#332a10;border-color:#5c4a16;color:#e8c25c}
+.fbtn.on.f4 .fbadge{color:#e8c25c}
+.f4tag{font-size:11px;font-weight:600;color:#c0a352;margin:0 2px 0 4px}
 .sep{width:1px;height:15px;background:#2a2e39;margin:0 3px}
 .fhint{color:#787b86;font-size:11px;margin:6px 0 12px;line-height:1.6}
 .hit{color:#9598a1}
@@ -77,7 +79,7 @@ canvas{display:block;width:100%;border-radius:4px}
   <button id="flt" onclick="toggleAll()">只看满足条件</button>
 </div>
 <div class="note">
-  数据由云端每 15 分钟生成一次（快照，非实时）· 涨红跌绿 · 页面不依赖任何外部服务，受限网络也能打开<br>
+  数据由云端每 15 分钟生成一次（快照，非实时）· 涨绿跌红 · 页面不依赖任何外部服务，受限网络也能打开<br>
   金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>
   判定口径与推送一致：<b>1d 型</b> ADX&gt;20 · ATR/价 0.5-2% · 1d 结构定方向 · 贴日线关键位 ±1.5% · SRSI 同向极端 · 空间&gt;10%<br>
   <b>4H 型</b>：同一套 ADX/ATR/空间门 + 4h 结构定方向（1h 须同向）· 贴 4h 关键位 ±1.5% · 4h SRSI 同向极端 · 1h 与 1d SRSI 均不反向极端
@@ -97,7 +99,8 @@ canvas{display:block;width:100%;border-radius:4px}
 <div id="app"></div>
 
 <script>
-const UP = '#ef5350', DOWN = '#26a69a';
+/* K 线涨跌色：2026-09-21 按用户要求改为 **涨绿跌红**（UP=绿、DOWN=红） */
+const UP = '#26a69a', DOWN = '#ef5350';
 const DIRMAP = { 1: '上行↑', '-1': '下行↓', 0: '横盘' };
 
 /* 六道门 + 优先级（数组顺序即优先级，weight 用于同门数时的加权排序）。
@@ -493,7 +496,7 @@ function load() {
       syncAllBtn();
       const p = d.params || {};
       document.querySelector('.note').innerHTML =
-        `数据由云端每 15 分钟生成一次（快照，非实时）· 涨红跌绿 · 页面不依赖任何外部服务，受限网络也能打开<br>` +
+        `数据由云端每 15 分钟生成一次（快照，非实时）· 涨绿跌红 · 页面不依赖任何外部服务，受限网络也能打开<br>` +
         `金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>` +
         `<b>1d 型</b>（回调/趋势）：ADX&gt;${p.ADX} · ATR/价 ${p.ATR[0]}-${p.ATR[1]}% · 1d 结构定方向 · ` +
         `贴日线关键位 ±${p.LEVEL_PCT}% · SRSI 同向极端 · 空间&gt;${p.SPACE_MIN}%<br>` +
