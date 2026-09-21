@@ -101,3 +101,37 @@ jobs:
           git commit -q -m "chore: publish trend charts [skip ci]"
           git push -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
           echo "published to gh-pages"
+
+  # 横盘窄幅扫描（2026-09-21 新增）：扫成交额前 500，找「一周以上、区间宽度 ≤6% 且来回震荡」的箱体，
+  # 并标注其中 1h 是否已经开始有趋势。结果写 box_scan.json 提交回 main。
+  # 为什么单开一个 job：这一类标的正被主扫描主动淘汰（日线横盘直接出局），且池子要放大到 500。
+  # 频率：脚本自带 55 分钟节流（MIN_INTERVAL_MIN），所以每 15 分钟触发也只会每小时真扫一次；
+  #       手动想看结果时设环境变量 FORCE=1 即可绕过。
+  boxscan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install requests urllib3 --quiet
+
+      - name: Run box scanner
+        run: python box_scan.py
+
+      - name: Commit scan result
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add box_scan.json
+          git commit -m "chore: update box scan [skip ci]" || { echo "nothing to commit"; exit 0; }
+          # scan job 可能同时在提交 pushed_state.json，冲突时先 rebase 再推
+          git pull --rebase origin main || true
+          git push || echo "push failed (concurrent update); result will refresh next run"
