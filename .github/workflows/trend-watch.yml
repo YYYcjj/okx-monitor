@@ -102,36 +102,12 @@ jobs:
           git push -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
           echo "published to gh-pages"
 
-  # 横盘窄幅扫描（2026-09-21 新增）：扫成交额前 500，找「一周以上、区间宽度 ≤6% 且来回震荡」的箱体，
-  # 并标注其中 1h 是否已经开始有趋势。结果写 box_scan.json 提交回 main。
-  # 为什么单开一个 job：这一类标的正被主扫描主动淘汰（日线横盘直接出局），且池子要放大到 500。
-  # 频率：脚本自带 55 分钟节流（MIN_INTERVAL_MIN），所以每 15 分钟触发也只会每小时真扫一次；
-  #       手动想看结果时设环境变量 FORCE=1 即可绕过。
-  boxscan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install deps
-        run: pip install requests urllib3 --quiet
-
-      - name: Run box scanner
-        run: python box_scan.py
-
-      - name: Commit scan result
-        if: success()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add box_scan.json
-          git commit -m "chore: update box scan [skip ci]" || { echo "nothing to commit"; exit 0; }
-          # scan job 可能同时在提交 pushed_state.json，冲突时先 rebase 再推
-          git pull --rebase origin main || true
-          git push || echo "push failed (concurrent update); result will refresh next run"
+  # 注：2026-09-21 曾短暂试过第三个 job「boxscan」（横盘窄幅扫描，扫前 500，找 ≤6% 窄幅箱体 + 1h 启动），
+  # 同日按用户决定**撤销**——只需两类信号：1d 型（回调/趋势）与 4H 型。脚本与产物已从仓库删除，
+  # 本地留档于工作区 box_scan.py 与 box_scan.last.json。若日后想恢复，注意两条实测结论：
+  #   ①「一周波动 ≤6%」在这个市场里筛出来几乎全是**非加密标的**（OKX 的 Tokenized Stocks 与
+  #      Commodity Perpetuals，如 XAU/XPT/XPD/NG/BZ/XCU/TSM/UNH/POPMART，instId 同样形如
+  #      「XXX-USDT-SWAP」，只能靠名单排除）；当时 500 个标的里加密只命中 TRX 一个，
+  #      放宽到 ≤9% 才有几个（TRX/WLFI 等）。
+  #   ② 只卡区间宽度会被「慢速单边」骗过（每天涨 0.2% 的慢牛，7 日宽度只有 ~1.4%），
+  #      必须同时要求「净位移 ÷ 宽度 ≤ 0.5」才是真来回震荡。
