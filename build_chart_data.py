@@ -17,6 +17,7 @@ TrendWatch 走势图数据生成（2026-09-20 重写）
   - ADX(1h)、ATR/价、四周期结构方向（1d/4h/1h/15m）
   - 日线 swing 高/低点（价位 + 时间）
   - 六道门的逐门通过情况 + 信号类型/方向/目标位/空间
+  - `sig4`：「4H 型」逐门结果（2026-09-21 新增；固定门复用上面三个，另给 4h 专属四门）
 
 币种范围：固定监控 7 币 + 当日已推送 + 成交额前 100（去重，固定币在前）。
 """
@@ -148,6 +149,10 @@ def build_coin(name):
     d15m = (structure_dir([c[2] for c in m15], [c[3] for c in m15], min_pct=MIN_SWING_PCT_15M)
             if m15 else 0)
     sh1d, sl1d = find_swings(highs1d, lows1d, p=SWING_P)
+    # 4h 侧指标（「4H 型」用，2026-09-21 新增）：SRSI 末值 + swing 点
+    kv4 = calc_stoch_rsi_series([c[4] for c in h4]) if h4 else None
+    s4h = srsi_last(kv4) if kv4 else None
+    sh4h, sl4h = (find_swings(highs4h, lows4h, p=SWING_P) if h4 else ([], []))
     price = closes1[-1]
 
     # ---- 逐门判定（与 tw_calc.classify 的 V2 口径完全一致，仅拆开展示）----
@@ -178,6 +183,38 @@ def build_coin(name):
         space_pct = sp * 100.0
     space_ok = space_pct is not None and space_pct > MIN_SPACE_PCT
 
+    # ---- 「4H 型」逐门判定（2026-09-21 新增；与 tw_calc.classify_4h 口径完全一致，仅拆开展示）----
+    # 固定门 adx / atr / space 与 1d 型共用；4h 专属四门：
+    #   dir  ：4h 结构非横盘 且 1h 结构同向（1h、4h 方向相同）
+    #   level：价格贴 4h 关键位 ±1.5%（多贴 4h swing low / 空贴 4h swing high）
+    #   srsi ：4h SRSI 同向极端（多<20 / 空>80）
+    #   rev  ：1h SRSI 与 1d SRSI 均不反向极端（多不>80 / 空不<20）
+    dir4_ok = (d4h != 0 and d1h == d4h)
+    if dir4_ok:
+        lv4 = [p for _, p in (sl4h[-2:] if d4h == 1 else sh4h[-2:])]
+        level4_ok = near_key_level(price, lv4)
+        if d4h == 1:
+            srsi4_ok = s4h is not None and s4h < SRSI_LOW
+            rev4_ok = (s1h <= SRSI_HIGH and s1 <= SRSI_HIGH)
+        else:
+            srsi4_ok = s4h is not None and s4h > SRSI_HIGH
+            rev4_ok = (s1h >= SRSI_LOW and s1 >= SRSI_LOW)
+    else:
+        level4_ok = srsi4_ok = rev4_ok = False
+    # 目标位与空间：同样取日线最近 swing 高/低，但按 **4h 方向** 取
+    target4 = None
+    if d4h == 1 and sh1d:
+        target4 = sh1d[-1][1]
+    elif d4h == -1 and sl1d:
+        target4 = sl1d[-1][1]
+    space4_pct = None
+    if target4 and price > 0:
+        sp4 = (target4 - price) / price if d4h == 1 else (price - target4) / price
+        space4_pct = sp4 * 100.0
+    space4_ok = space4_pct is not None and space4_pct > MIN_SPACE_PCT
+    sig4_ok = bool(adx_ok and atr_ok and dir4_ok and level4_ok
+                   and srsi4_ok and rev4_ok and space4_ok)
+
     dir_cn = {1: "多", -1: "空"}.get(d1d)
     signal = bool(adx_ok and atr_ok and dir1d_ok and level_ok and srsi_ok and space_ok and kind)
 
@@ -197,6 +234,13 @@ def build_coin(name):
         "signal": signal, "kind": kind, "dir": dir_cn,
         "gates": {"adx": adx_ok, "atr": atr_ok, "dir1d": dir1d_ok,
                   "level": level_ok, "srsi": srsi_ok, "space": space_ok},
+        # 「4H 型」：固定门（adx/atr/space）复用上面的 gates，4h 专属四门放这里
+        "sig4": {"ok": sig4_ok, "dir": d4h,
+                 "s4h": None if s4h is None else round(s4h, 1),
+                 "tgt": r5(target4) if target4 else None,
+                 "space_pct": None if space4_pct is None else round(space4_pct, 1),
+                 "gates": {"dir": dir4_ok, "level": level4_ok,
+                           "srsi": srsi4_ok, "rev": rev4_ok}},
     }
 
 
@@ -212,9 +256,10 @@ def main():
         c = build_coin(nm)
         if c:
             coins.append(c)
-            print(f"  {nm}: SRSI {c['s1']}/{c['s1h']} ADX {c['adx1h']} ATR {c['atr_pct']}% "
-                  f"结构 {c['d1d']}/{c['d4h']}/{c['d1h']} 空间 {c['space_pct']} "
-                  f"信号 {'★' if c['signal'] else '-'}", flush=True)
+            print(f"  {nm}: SRSI {c['s1']}/{c['s1h']}/{c['sig4']['s4h']} ADX {c['adx1h']} "
+                  f"ATR {c['atr_pct']}% 结构 {c['d1d']}/{c['d4h']}/{c['d1h']} "
+                  f"空间 {c['space_pct']} 信号 {'★' if c['signal'] else '-'}"
+                  f"{' 4H★' if c['sig4']['ok'] else ''}", flush=True)
         else:
             fails += 1
             print(f"  {nm}: 数据不足，跳过", flush=True)
@@ -247,7 +292,9 @@ def main():
 
     kb = os.path.getsize("charts_data.json") / 1024
     sigs = sum(1 for c in coins if c["signal"])
-    print(f"\nwrote charts_data.json: {len(coins)} coins, {kb:.0f} KB, 命中 {sigs} 个")
+    sigs4 = sum(1 for c in coins if c["sig4"]["ok"])
+    print(f"\nwrote charts_data.json: {len(coins)} coins, {kb:.0f} KB, "
+          f"1d 型命中 {sigs} 个, 4H 型命中 {sigs4} 个")
     if kb > 8192:
         raise SystemExit("charts_data.json 超过 8 MB，需下调 BARS 或 SCAN_TOP")
 
