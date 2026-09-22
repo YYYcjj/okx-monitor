@@ -67,7 +67,7 @@ canvas{display:block;width:100%;border-radius:4px}
 <div class="note">
   数据由云端每 15 分钟生成一次（快照，非实时）· 涨绿跌红 · 页面不依赖任何外部服务，受限网络也能打开<br>
   金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>
-  判定口径与推送一致（<b>统一策略</b>）：① 1日与1小时方向一致 ② 日线在关键位置 ±1.5% ③ 日线 SRSI 超买超卖位 ④ 4小时 SRSI 不在反向极值<br>
+  判定口径与推送一致（<b>统一策略</b>）：① 1小时不与日线反向 ② 日线在关键位置 ±2.5% ③ 日线 SRSI 超买超卖位（多&lt;25 / 空&gt;75） ④ 4小时 SRSI 不在反向极值<br>
   固定门：ADX&gt;20 · ATR/价 0.5-2% · 空间&gt;10%
 </div>
 
@@ -94,9 +94,9 @@ const DIRMAP = { 1: '上行↑', '-1': '下行↓', 0: '横盘' };
    required:true = 必选条件（始终满足、页面上不可取消）。
    改优先级/必选项只需调整本数组（序号、按钮、角标、排序都会自动跟随）。 */
 const GATES = [
-  { key: 'dir_same',  label: '1d/1h同向',  weight: 7, note: '日线与 1h 结构同向（任一横盘或方向相反 → 淘汰）' },
-  { key: 'level',     label: '贴关键位',    weight: 6, note: '价格贴日线 swing 高/低 ±1.5%' },
-  { key: 'srsi1d',    label: '1d SRSI极端', weight: 5, note: '日线 SRSI 超买超卖位（多<20 / 空>80）' },
+  { key: 'dir1h',     label: '1h不反向',    weight: 7, note: '1h 结构不与日线反向（横盘或同向放行，日线横盘淘汰）' },
+  { key: 'level',     label: '贴关键位',    weight: 6, note: '价格贴日线 swing 高/低 ±2.5%' },
+  { key: 'srsi1d',    label: '1d SRSI极端', weight: 5, note: '日线 SRSI 超买超卖位（多<25 / 空>75）' },
   { key: 'not_rev4h', label: '4h不反向',    weight: 4, note: '4h SRSI 不在反向极值（多≤80 / 空≥20）' },
   { key: 'space',     label: '空间>10%',    weight: 3, note: '目标位到现价的空间', required: true },
   { key: 'adx',       label: 'ADX>20',      weight: 2, note: '1h 趋势动能', required: true },
@@ -409,11 +409,13 @@ function load() {
       buildFilters();
       syncAllBtn();
       const p = d.params || {};
+      // ③ 的触发门槛来自 params.SRSI1D；旧数据没有该字段时兜底用反向极值阈值，避免整页渲染中断
+      const s1d = p.SRSI1D || p.SRSI || [20, 80];
       document.querySelector('.note').innerHTML =
         `数据由云端每 15 分钟生成一次（快照，非实时）· 涨绿跌红 · 页面不依赖任何外部服务，受限网络也能打开<br>` +
         `金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>` +
-        `<b>统一策略</b>（与推送口径同源）：① 1日与1小时方向一致 ② 日线在关键位置 ±${p.LEVEL_PCT}% ` +
-        `③ 日线 SRSI 超买超卖位（多&lt;${p.SRSI[0]} / 空&gt;${p.SRSI[1]}） ④ 4小时 SRSI 不在反向极值<br>` +
+        `<b>统一策略</b>（与推送口径同源）：① 1小时不与日线反向 ② 日线在关键位置 ±${p.LEVEL_PCT}% ` +
+        `③ 日线 SRSI 超买超卖位（多&lt;${s1d[0]} / 空&gt;${s1d[1]}） ④ 4小时 SRSI 不在反向极值<br>` +
         `<b>固定门</b>：ADX&gt;${p.ADX} · ATR/价 ${p.ATR[0]}-${p.ATR[1]}% · 空间&gt;${p.SPACE_MIN}%`;
       paint();
     })

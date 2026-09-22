@@ -9,6 +9,8 @@
 # 2026-09-22：按用户要求**合并为单一策略**——撤销 classify_4h，「1d 型 / 4H 型」两类归一：
 #            以日线为锚（①1d 与 1h 方向一致 ②日线关键位 ③日线 SRSI 极端），4h SRSI 仅作反向保险；
 #            固定门（ADX / ATR / 空间）不变。
+# 2026-09-22（同日第二次）：三条放宽（用户确认）——① 改为「1h 不与日线反向」（允许 1h 横盘）、
+#            ② 关键位 ±1.5% → ±2.5%、③ 日线 SRSI 触发门槛 20/80 → 25/75（④ 的反向极值判据仍是 20/80）。
 from tw_conf import *
 
 def calc_rsi(closes, period=14):
@@ -177,7 +179,7 @@ def near_key_level(price, levels, pct=NEAR_LEVEL_PCT):
 def classify(s1, s1h, s4h, adx1h, atr_ratio, d1d, d1h,
              price, sh1d, sl1d):
     """统一顺势信号（2026-09-22 起为**单一策略**，取代原先并列的「1d 型 / 4H 型」两类）：
-    一句话：**以日线为锚（方向 + 位置 + 触发），1 小时确认方向，4 小时做反向保险。**
+    一句话：**以日线为锚（方向 + 位置 + 触发），1 小时做方向过滤，4 小时做反向保险。**
 
     固定门（系统既有质量门，不变）：
         - 1h ADX > ADX_THRESHOLD(20)
@@ -185,11 +187,15 @@ def classify(s1, s1h, s4h, adx1h, atr_ratio, d1d, d1h,
         - 目标空间 > MIN_SPACE_PCT(10%)：目标取日线最近 swing 高(多)/低(空)
 
     策略四条件（须全部满足，任一不满足即淘汰）：
-        ① 1日与1小时方向一致：d1d ≠ 0 且 d1h == d1d（任一横盘、或方向相反 → 淘汰）
+        ① 1小时不与日线反向：日线结构非横盘（d1d ≠ 0），且 d1h ∈ {0, d1d}
+           （**1h 横盘或同向都放行**；只有 1h 明确反向才淘汰）
+           注：2026-09-22 由「必须同向 d1h == d1d」放宽而来——实测那一条会把频率压到 0%
         ② 日线在关键位置：做多贴日线 swing low（支撑）、做空贴日线 swing high（阻力），
-           距离 ≤ NEAR_LEVEL_PCT(±1.5%)
-        ③ 日线 SRSI 超买超卖位：做多 s1 < SRSI_LOW(20)；做空 s1 > SRSI_HIGH(80)
-        ④ 4小时 SRSI 不在反向极值：做多 s4h ≤ SRSI_HIGH(80)；做空 s4h ≥ SRSI_LOW(20)
+           距离 ≤ NEAR_LEVEL_PCT(±2.5%)（2026-09-22 由 ±1.5% 放宽）
+        ③ 日线 SRSI 超买超卖位（触发）：做多 s1 < SRSI1D_LOW(25)；做空 s1 > SRSI1D_HIGH(75)
+           （2026-09-22 由 20/80 放宽）
+        ④ 4小时 SRSI 不在反向极值（保险）：做多 s4h ≤ SRSI_HIGH(80)；做空 s4h ≥ SRSI_LOW(20)
+           注意这里用的仍是 20/80（反向极值判据），与 ③ 的 25/75 是两套阈值
 
     s4h 为 None（4h 数据不足）时保险门无法确认，直接淘汰。
     返回 ("日线", "多"/"空", 附加信息dict) 或 None。
@@ -200,10 +206,10 @@ def classify(s1, s1h, s4h, adx1h, atr_ratio, d1d, d1h,
     if not (ATR_MIN_RATIO < atr_ratio < ATR_MAX_RATIO):
         return None
 
-    # ---- ① 1日与1小时方向一致（横盘 0 淘汰；方向相反淘汰）----
-    if d1d == 0 or d1h != d1d:
+    # ---- ① 1小时不与日线反向（日线横盘淘汰；1h 横盘/同向放行、反向淘汰）----
+    if d1d == 0 or d1h not in (0, d1d):
         return None
-    dirn = d1d  # 信号方向 = 日线结构方向（已确认 1h 同向）
+    dirn = d1d  # 信号方向 = 日线结构方向
 
     # ---- ② 日线在关键位置 ----
     if dirn == 1:
@@ -213,17 +219,17 @@ def classify(s1, s1h, s4h, adx1h, atr_ratio, d1d, d1h,
         if not near_key_level(price, [p for _, p in sh1d[-2:]]):
             return None
 
-    # ---- ③ 日线 SRSI 同向极端（触发） + ④ 4h SRSI 不反向极值（保险）----
+    # ---- ③ 日线 SRSI 同向极端（触发，25/75） + ④ 4h SRSI 不反向极值（保险，20/80）----
     if dirn == 1:
-        if s1 >= SRSI_LOW:                      # ③ 日线未进入超卖
+        if s1 >= SRSI1D_LOW:                    # ③ 日线未进入超卖区（需 <25）
             return None
-        if s4h is None or s4h > SRSI_HIGH:      # ④ 4h 反向极值（超买）
+        if s4h is None or s4h > SRSI_HIGH:      # ④ 4h 反向极值（超买，>80）
             return None
         target = sh1d[-1][1] if sh1d else None
     else:
-        if s1 <= SRSI_HIGH:                     # ③ 日线未进入超买
+        if s1 <= SRSI1D_HIGH:                   # ③ 日线未进入超买区（需 >75）
             return None
-        if s4h is None or s4h < SRSI_LOW:       # ④ 4h 反向极值（超卖）
+        if s4h is None or s4h < SRSI_LOW:       # ④ 4h 反向极值（超卖，<20）
             return None
         target = sl1d[-1][1] if sl1d else None
 

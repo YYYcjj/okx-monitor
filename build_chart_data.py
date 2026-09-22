@@ -7,8 +7,8 @@ TrendWatch 走势图数据生成（2026-09-22 更新为**统一策略**口径）
   1. 指标一律复用 tw_calc / tw_conf（与推送口径同源，避免两套逻辑分叉）。
   2. 判定口径 = 2026-09-22 起生效的**单一策略**（与 tw_calc.classify 一一对应，仅拆开展示）：
        固定门：ADX(1h)>20 ｜ ATR/价 0.5-2% ｜ 目标空间 >10%（目标取日线最近 swing 高/低）
-       ① 1日与1小时方向一致   ② 日线在关键位置（±1.5% 贴日线 swing 低/高）
-       ③ 日线 SRSI 超买超卖位  ④ 4小时 SRSI 不在反向极值
+       ① 1小时不与日线反向（1h 横盘或同向放行）  ② 日线在关键位置（±2.5% 贴日线 swing 低/高）
+       ③ 日线 SRSI 超买超卖位（多<25 / 空>75）   ④ 4小时 SRSI 不在反向极值（多≤80 / 空≥20）
   3. 页面**不发任何外部请求**：K 线、SRSI、当日已推送列表全部内嵌，
      所以手机/受限网络下也能打开（这是它和浏览器直连版的根本区别）。
   4. 输出做数值压缩（5 位有效数字 + 精简分隔符），100 币约 1.5-2 MB。
@@ -31,7 +31,8 @@ from datetime import datetime, timezone, timedelta
 import requests
 
 from tw_conf import (OKX, SWING_P, ADX_THRESHOLD, ATR_MIN_RATIO, ATR_MAX_RATIO,
-                     SRSI_LOW, SRSI_HIGH, NEAR_LEVEL_PCT, MIN_SPACE_PCT,
+                     SRSI_LOW, SRSI_HIGH, SRSI1D_LOW, SRSI1D_HIGH,
+                     NEAR_LEVEL_PCT, MIN_SPACE_PCT,
                      MIN_SWING_PCT_1H, MIN_SWING_PCT_1D, MIN_SWING_PCT_4H,
                      MIN_SWING_PCT_15M, STATE_FILE)
 from tw_calc import (calc_stoch_rsi_series, srsi_last, calc_atr, calc_adx,
@@ -159,18 +160,18 @@ def build_coin(name):
     # 固定门：ADX>20 ｜ ATR 区间 ｜ 目标空间 >10%（目标取日线最近 swing 高/低）
     adx_ok = adx1h >= ADX_THRESHOLD
     atr_ok = ATR_MIN_RATIO < atr_ratio < ATR_MAX_RATIO
-    # ① 1日与1小时方向一致（横盘 / 方向相反 → 不通过）
-    dir_same_ok = (d1d != 0 and d1h == d1d)
-    # ② 日线在关键位置（多贴日线 swing low，空贴日线 swing high，±1.5%）
-    if dir_same_ok:
+    # ① 1小时不与日线反向（日线非横盘，且 1h 为横盘或与日线同向）
+    dir1h_ok = (d1d != 0 and d1h in (0, d1d))
+    # ② 日线在关键位置（多贴日线 swing low，空贴日线 swing high，±2.5%）
+    if dir1h_ok:
         levels = [p for _, p in (sl1d[-2:] if d1d == 1 else sh1d[-2:])]
         level_ok = near_key_level(price, levels)
     else:
         level_ok = False
-    # ③ 日线 SRSI 超买超卖位（多 <20 / 空 >80）
-    srsi1d_ok = dir_same_ok and ((s1 < SRSI_LOW) if d1d == 1 else (s1 > SRSI_HIGH))
-    # ④ 4小时 SRSI 不在反向极值（多 ≤80 / 空 ≥20）；4h 数据缺失视为不通过
-    not_rev4h_ok = bool(dir_same_ok and s4h is not None and
+    # ③ 日线 SRSI 超买超卖位（多 <25 / 空 >75；2026-09-22 由 20/80 放宽）
+    srsi1d_ok = bool(dir1h_ok and ((s1 < SRSI1D_LOW) if d1d == 1 else (s1 > SRSI1D_HIGH)))
+    # ④ 4小时 SRSI 不在反向极值（多 ≤80 / 空 ≥20；反向极值判据仍是 SRSI_LOW/HIGH）
+    not_rev4h_ok = bool(dir1h_ok and s4h is not None and
                         (s4h <= SRSI_HIGH if d1d == 1 else s4h >= SRSI_LOW))
 
     # 目标位与空间（按日线方向取）
@@ -186,7 +187,7 @@ def build_coin(name):
     space_ok = space_pct is not None and space_pct > MIN_SPACE_PCT
 
     dir_cn = {1: "多", -1: "空"}.get(d1d)
-    signal = bool(adx_ok and atr_ok and dir_same_ok and level_ok
+    signal = bool(adx_ok and atr_ok and dir1h_ok and level_ok
                   and srsi1d_ok and not_rev4h_ok and space_ok)
 
     # SRSI 序列右对齐到对应 K 线末端（长度短于 K 线，页面按下标偏移对齐）
@@ -205,7 +206,7 @@ def build_coin(name):
         "space_pct": None if space_pct is None else round(space_pct, 1),
         "signal": signal, "kind": "日线", "dir": dir_cn,
         # 七道门：前四道 = 策略四条件（①②③④），后三道 = 固定门（页面里设为必选）
-        "gates": {"dir_same": dir_same_ok, "level": level_ok,
+        "gates": {"dir1h": dir1h_ok, "level": level_ok,
                   "srsi1d": srsi1d_ok, "not_rev4h": not_rev4h_ok,
                   "space": space_ok, "adx": adx_ok, "atr": atr_ok},
     }
@@ -248,7 +249,8 @@ def main():
         "fixed": FIXED,
         "params": {"ADX": ADX_THRESHOLD,
                    "ATR": [ATR_MIN_RATIO * 100, ATR_MAX_RATIO * 100],
-                   "SRSI": [SRSI_LOW, SRSI_HIGH],
+                   "SRSI": [SRSI_LOW, SRSI_HIGH],          # ④ 反向极值判据（图上 20/80 虚线也是它）
+                   "SRSI1D": [SRSI1D_LOW, SRSI1D_HIGH],    # ③ 日线触发门槛
                    "LEVEL_PCT": round(NEAR_LEVEL_PCT * 100, 1),
                    "SPACE_MIN": MIN_SPACE_PCT},
         "coins": coins,

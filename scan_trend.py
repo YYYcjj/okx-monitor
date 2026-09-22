@@ -10,9 +10,9 @@ TrendWatch —— 统一顺势信号扫描（2026-09-22 起为**单一策略**�
     （目标取日线最近 swing 高/低；空间 = 目标到现价）
 
 策略四条件（须全部满足；判定见 tw_calc.classify）：
-    ① 1日与1小时方向一致：日线结构非横盘，且 1h 结构与日线同向（任一横盘 / 方向相反 → 淘汰）
-    ② 日线在关键位置：做多贴日线 swing low（支撑）/ 做空贴日线 swing high（阻力），±1.5%
-    ③ 日线 SRSI 超买超卖位：做多 s1 < 20 / 做空 s1 > 80（触发条件）
+    ① 1小时不与日线反向：日线结构非横盘，且 1h 结构为「横盘或与日线同向」（明确反向才淘汰）
+    ② 日线在关键位置：做多贴日线 swing low（支撑）/ 做空贴日线 swing high（阻力），±2.5%
+    ③ 日线 SRSI 超买超卖位：做多 s1 < 25 / 做空 s1 > 75（触发条件）
     ④ 4小时 SRSI 不在反向极值：做多 s4h ≤ 80 / 做空 s4h ≥ 20（保险）
 
 15m 共振：仅标注「★推荐」（15m 结构与信号同向），不过滤，帮助优先关注。
@@ -164,9 +164,9 @@ def main():
         h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
         h += '<h3 style="margin:0 0 6px">TrendWatch（日线关键位 · 1d/1h 同向）</h3>'
         h += (f'<div style="font-size:11px;color:#666;margin-bottom:6px">'
-              f'<b>策略</b>：① 1日与1小时方向一致 ② 日线在关键位置（±{NEAR_LEVEL_PCT*100:.1f}%）'
-              f' ③ 日线 SRSI 超买超卖位（多&lt;{SRSI_LOW} / 空&gt;{SRSI_HIGH}）'
-              f' ④ 4小时 SRSI 不在反向极值 ｜ '
+              f'<b>策略</b>：① 1小时不与日线反向 ② 日线在关键位置（±{NEAR_LEVEL_PCT*100:.1f}%）'
+              f' ③ 日线 SRSI 超买超卖位（多&lt;{SRSI1D_LOW} / 空&gt;{SRSI1D_HIGH}）'
+              f' ④ 4小时 SRSI 不在反向极值（{SRSI_LOW}/{SRSI_HIGH}） ｜ '
               f'质量门：ADX&gt;{ADX_THRESHOLD} &amp; ATR/价 {ATR_MIN_RATIO*100:.1f}-{ATR_MAX_RATIO*100:.0f}% &amp; 空间&gt;{MIN_SPACE_PCT:.0f}% ｜ '
               f'每日前 {TOP_N} 个　共 {len(new_cands)} 个</div>')
         for r in new_cands:
