@@ -16,7 +16,7 @@ button:hover{border-color:#5d606b}
 button.on{background:#2962ff;border-color:#2962ff;color:#fff}
 .note{color:#787b86;font-size:11px;margin:4px 0 12px;line-height:1.7}
 .card{background:#131722;border:1px solid #2a2e39;border-radius:8px;margin:10px 0;padding:10px}
-.card.sig{border-color:#3d2f5c}          /* 1d 型信号：紫边框（与 4H 型对调后） */
+.card.sig{border-color:#3d2f5c}          /* 策略命中（满足七道门）：紫边框 */
 .hd{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .nm{font-size:15px;font-weight:600}
 .px{font-size:13px;color:#b2b5be}
@@ -24,8 +24,7 @@ button.on{background:#2962ff;border-color:#2962ff;color:#fff}
 /* 涨跌配色：2026-09-21 按用户要求改为 **涨绿跌红**（多=绿、空=红），与推送卡片一致 */
 .t-long{background:#14301f;color:#26a69a;border:1px solid #1f4a35}
 .t-short{background:#3d1d1e;color:#ef5350;border:1px solid #5c2b2b}
-.t-kind{background:#1f2937;color:#85b7eb;border:1px solid #2c3b52}
-/* 1d 型（回调/趋势）主色：**紫**（2026-09-21 按用户要求与 4H 型对调，原为金/黄） */
+/* 策略命中主色：**紫**（与推送卡片里的「日线锚定」紫色一致） */
 .t-sig{background:#221a33;color:#b18ff0;border:1px solid #3d2f5c}
 .t-fix{background:#1c1f26;color:#9598a1;border:1px solid #2a2e39}
 .metrics{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 6px;font-size:12px;color:#9598a1}
@@ -54,19 +53,6 @@ canvas{display:block;width:100%;border-radius:4px}
 .fbtn.req .fbadge{color:#a9e3c4}
 .fbtn.req .lock{font-size:10px;color:#7fd6a5}
 .lockmsg{color:#f0b90b;font-size:11px;margin-left:6px}
-/* ---- 「4H 型」专属样式（2026-09-21 新增）：**金色系**（与 1d 型的紫色对调，按用户要求） ---- */
-.tag.t-4h{background:#4a3410;color:#f0b90b;border:1px solid #6b4a12}
-.card.sig4{border-color:#6b4a12}
-.card.sig4.sig{border-color:#6b4a12}      /* 两类同时命中时，边框取 4H 型的金色 */
-.g4row{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:0 0 8px}
-.g4head{font-size:11px;font-weight:600;color:#c0a352;margin-right:2px}
-.chip.g4{background:#1f1a10;border-color:#3d3218}
-.chip.g4.ok{background:#332a10;color:#e8c25c;border-color:#5c4a16}
-.fbtn.f4{padding-left:8px}
-.fbtn.on.f4{background:#332a10;border-color:#5c4a16;color:#e8c25c}
-.fbtn.on.f4 .fbadge{color:#e8c25c}
-.f4tag{font-size:11px;font-weight:600;color:#c0a352;margin:0 2px 0 4px}
-.sep{width:1px;height:15px;background:#2a2e39;margin:0 3px}
 .fhint{color:#787b86;font-size:11px;margin:6px 0 12px;line-height:1.6}
 .hit{color:#9598a1}
 .hit b{color:#f0b90b}
@@ -81,17 +67,16 @@ canvas{display:block;width:100%;border-radius:4px}
 <div class="note">
   数据由云端每 15 分钟生成一次（快照，非实时）· 涨绿跌红 · 页面不依赖任何外部服务，受限网络也能打开<br>
   金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>
-  判定口径与推送一致：<b>1d 型</b> ADX&gt;20 · ATR/价 0.5-2% · 1d 结构定方向 · 贴日线关键位 ±1.5% · SRSI 同向极端 · 空间&gt;10%<br>
-  <b>4H 型</b>：同一套 ADX/ATR/空间门 + 4h 结构定方向（1h 须同向）· 贴 4h 关键位 ±1.5% · 4h SRSI 同向极端 · 1h 与 1d SRSI 均不反向极端
+  判定口径与推送一致（<b>统一策略</b>）：① 1日与1小时方向一致 ② 日线在关键位置 ±1.5% ③ 日线 SRSI 超买超卖位 ④ 4小时 SRSI 不在反向极值<br>
+  固定门：ADX&gt;20 · ATR/价 0.5-2% · 空间&gt;10%
 </div>
 
 <!-- 条件筛选：点亮的条件 = 必须通过（多选为「且」关系）；数字 = 优先级；
      required:true 的条件为「必选」，始终满足且不可取消 -->
 <div class="filters" id="filters"></div>
 <div class="fhint">
-  数字 = 优先级（①最优先）：<b>排序先看「通过条件数」，多的靠前</b>；数量相同时再按优先级加权得分（①6分 ②5分 ③4分 ④3分 ⑤2分 ⑥1分），仍相同则看目标空间<br>
-  <b>④空间&gt;10% · ⑤ADX&gt;20 · ⑥ATR区间 为必选</b>（始终满足，不可取消）；①②③ 可点击加入筛选<br>
-  <span class="f4tag">4H型</span>点「<b>4H型</b>」= 一键筛出 4H 型成立的币，也可单点其中某道门做组合筛选（与 ①②③ 同为「且」关系）
+  数字 = 优先级（①最优先）：<b>排序先看「通过条件数」，多的靠前</b>；数量相同时再按优先级加权得分（①7分 ②6分 ③5分 ④4分 ⑤3分 ⑥2分 ⑦1分），仍相同则看目标空间<br>
+  <b>⑤空间&gt;10% · ⑥ADX&gt;20 · ⑦ATR区间 为固定门</b>（必选，始终满足、不可取消）；<b>①-④</b> 是策略四条件，可点击加入筛选
   <span class="hit">｜ 命中 <b id="hitv">-</b> / 共 <b id="totv">-</b></span>
   <span class="lockmsg" id="lockmsg"></span>
 </div>
@@ -103,32 +88,23 @@ canvas{display:block;width:100%;border-radius:4px}
 const UP = '#26a69a', DOWN = '#ef5350';
 const DIRMAP = { 1: '上行↑', '-1': '下行↓', 0: '横盘' };
 
-/* 六道门 + 优先级（数组顺序即优先级，weight 用于同门数时的加权排序）。
-   优先级依据策略语义：先定方向，再找位置，再看触发与空间，最后是动能/波动这类「质量门」。
+/* 七道门（数组顺序即优先级，weight 用于同门数时的加权排序）。
+   ①-④ = 策略四条件（可点击筛选）；⑤-⑦ = 固定质量门（必选，始终满足、不可取消）。
+   优先级依据策略语义：先方向、再位置、再触发/保险，最后是空间与动能/波动这类质量门。
    required:true = 必选条件（始终满足、页面上不可取消）。
    改优先级/必选项只需调整本数组（序号、按钮、角标、排序都会自动跟随）。 */
 const GATES = [
-  { key: 'dir1d', label: '1d方向', weight: 6, note: '日线结构定方向（横盘淘汰）' },
-  { key: 'level', label: '贴关键位', weight: 5, note: '价格贴近日线 swing 高/低 ±1.5%' },
-  { key: 'srsi', label: 'SRSI极端', weight: 4, note: '同向极端触发' },
-  { key: 'space', label: '空间>10%', weight: 3, note: '目标位到现价的空间', required: true },
-  { key: 'adx', label: 'ADX>20', weight: 2, note: '1h 趋势动能', required: true },
-  { key: 'atr', label: 'ATR区间', weight: 1, note: 'ATR/价 0.5-2%', required: true }
-];
-/* 「4H 型」四道专属门（2026-09-21 新增）。
-   固定门（ADX / ATR / 空间）与 1d 型共用、已由必选门过滤，所以这里只列 4h 专属的四道。
-   键名统一加 g4_ 前缀，避免与主 gates 的 level / srsi 撞键；f 为 sig4.gates 里的真实字段名。 */
-const GATES4 = [
-  { key: 'g4_dir',   f: 'dir',   label: '4h/1h同向',   note: '4h 结构非横盘，且 1h 结构同向' },
-  { key: 'g4_level', f: 'level', label: '贴4h关键位',  note: '价格贴 4h swing 高/低 ±1.5%' },
-  { key: 'g4_srsi',  f: 'srsi',  label: '4h SRSI极端', note: '4h SRSI 同向极端（多<20 / 空>80）' },
-  { key: 'g4_rev',   f: 'rev',   label: '1h·1d不反向', note: '1h 与 1d SRSI 均不处于反向极端' }
+  { key: 'dir_same',  label: '1d/1h同向',  weight: 7, note: '日线与 1h 结构同向（任一横盘或方向相反 → 淘汰）' },
+  { key: 'level',     label: '贴关键位',    weight: 6, note: '价格贴日线 swing 高/低 ±1.5%' },
+  { key: 'srsi1d',    label: '1d SRSI极端', weight: 5, note: '日线 SRSI 超买超卖位（多<20 / 空>80）' },
+  { key: 'not_rev4h', label: '4h不反向',    weight: 4, note: '4h SRSI 不在反向极值（多≤80 / 空≥20）' },
+  { key: 'space',     label: '空间>10%',    weight: 3, note: '目标位到现价的空间', required: true },
+  { key: 'adx',       label: 'ADX>20',      weight: 2, note: '1h 趋势动能', required: true },
+  { key: 'atr',       label: 'ATR区间',     weight: 1, note: 'ATR/价 0.5-2%', required: true }
 ];
 const REQ_KEYS = GATES.filter(g => g.required).map(g => g.key);   // 必选门
 const GATE_CNT = {};                 // 每道门在「必选过滤后」通过多少币（按钮角标）
-const G4_CNT = {};                   // 每道 4H 门在 BASE 内通过多少币
-const G4_SIG = { n: 0 };             // BASE 内 4H 型成立的币数
-const ACTIVE = new Set();            // 点亮的可选门 = 必须通过（4H 门存 g4_xxx 前缀）
+const ACTIVE = new Set();            // 点亮的可选门 = 必须通过
 let DATA = null, COINS = [], BASE = [];   // BASE = 通过全部必选门的币（展示池）
 let io = null;
 const drawn = new Set();
@@ -277,44 +253,32 @@ function setupObserver() {
 /* ---------------- 渲染卡片 ---------------- */
 function render(c) {
   const card = document.createElement('div');
-  const s4 = c.sig4 || {}, g4 = s4.gates || {};
-  const pass4 = GATES4.filter(x => g4[x.f]).length;
-  const has4 = c.d4h !== 0;                      // 4h 结构是否有方向
-  card.className = 'card' + (c.signal ? ' sig' : '') + (s4.ok ? ' sig4' : '');
+  card.className = 'card' + (c.signal ? ' sig' : '');
   const dirTag = c.dir === '多' ? '<span class="tag t-long">多</span>'
     : c.dir === '空' ? '<span class="tag t-short">空</span>'
       : '<span class="tag t-fix">无方向</span>';
   const sigTag = c.signal ? '<span class="tag t-sig">满足全部条件</span>' : '';
-  const sig4Tag = s4.ok ? '<span class="tag t-4h">4H型</span>' : '';
   const fixTag = c._fixed ? '<span class="tag t-fix">固定监控</span>' : '';
   const pushTag = c._pushed ? '<span class="tag t-sig">当日已推送</span>' : '';
   const g = c.gates || {};
   const passCnt = GATES.filter(x => g[x.key]).length;
   const chip = (label, ok) => `<span class="chip ${ok ? 'ok' : 'no'}">${label} ${ok ? '✓' : '✗'}</span>`;
-  // 「4H 型」行：4h 有方向时列四道门（点亮的门会高亮）；横盘则给出说明
-  const g4row = has4
-    ? `<div class="g4row"><span class="g4head">4H型 ${pass4}/4</span>` +
-      GATES4.map(x => `<span class="chip g4 ${g4[x.f] ? 'ok' : 'no'}">${x.label} ${g4[x.f] ? '✓' : '✗'}</span>`).join('') +
-      (s4.ok ? `<span class="chip g4 ok">目标 ${s4.tgt ? fmtP(s4.tgt) : '—'} · 空间 ${s4.space_pct === null || s4.space_pct === undefined ? '—' : '+' + s4.space_pct + '%'}</span>` : '') +
-      `</div>`
-    : `<div class="g4row"><span class="g4head">4H型</span><span class="chip g4">4h 结构横盘（无方向，不参与）</span></div>`;
   card.innerHTML = `
     <div class="hd">
       <span class="nm">${c.name}</span><span class="px">${fmtP(c.price)}</span>
-      ${dirTag} ${c.kind ? `<span class="tag t-kind">${c.kind}</span>` : ''} ${sigTag} ${sig4Tag} ${pushTag} ${fixTag}
+      ${dirTag} ${sigTag} ${pushTag} ${fixTag}
     </div>
     <div class="metrics">
-      <span>SRSI 1d <b>${c.s1}</b> / 1h <b>${c.s1h}</b>${s4.s4h === null || s4.s4h === undefined ? '' : ` / 4h <b>${s4.s4h}</b>`}</span>
+      <span>SRSI 1d <b>${c.s1}</b> / 1h <b>${c.s1h}</b> / 4h <b>${c.s4h === null || c.s4h === undefined ? '—' : c.s4h}</b></span>
       <span>ADX(1h) <b>${c.adx1h}</b></span>
       <span>ATR/价 <b>${c.atr_pct}%</b></span>
-      <span>结构 1d <b>${DIRMAP[c.d1d]}</b> · 4h <b>${DIRMAP[c.d4h]}</b> · 1h <b>${DIRMAP[c.d1h]}</b> · 15m <b>${DIRMAP[c.d15m]}</b></span>
+      <span>结构 1d <b>${DIRMAP[c.d1d]}</b> · 1h <b>${DIRMAP[c.d1h]}</b> · 4h <b>${DIRMAP[c.d4h]}</b> · 15m <b>${DIRMAP[c.d15m]}</b></span>
       <span>目标 <b>${c.target ? fmtP(c.target) : '—'}</b> · 空间 <b>${c.space_pct === null ? '—' : c.space_pct + '%'}</b></span>
       <span>通过 <b>${passCnt}/${GATES.length}</b> 门 · 加权 <b>${c._score}</b></span>
     </div>
     <div class="gates">
       ${GATES.map(x => chip(`${x.label}`, g[x.key])).join('')}
     </div>
-    ${g4row}
     <div class="tabs">
       <button class="tab on" data-tf="1D">1D</button>
       <button class="tab" data-tf="4H">4H</button>
@@ -343,23 +307,16 @@ function gateScore(c) {
 function gatePass(c) {
   return GATES.filter(g => c.gates && c.gates[g.key]).length;
 }
-/* 排序：① 通过条件数多者靠前（主键）② 同数量时按优先级加权得分 ③ 再看目标空间
-   ④ 再看 4H 型四门通过数（2026-09-21 新增的末级 tie-breaker，不改变前面三级） ⑤ 固定监控币 */
+/* 排序：① 通过条件数多者靠前（主键）② 同数量时按优先级加权得分 ③ 再看目标空间 ④ 固定监控币 */
 function byPriority(a, b) {
   return (b._pass - a._pass) ||
     (b._score - a._score) ||
     (((b.space_pct === null ? -999 : b.space_pct)) - ((a.space_pct === null ? -999 : a.space_pct))) ||
-    (b._pass4 - a._pass4) ||
     (b._fixed - a._fixed);
 }
 function visibleCoins() {
   let list = BASE;                                   // 必选门已在 BASE 阶段过滤掉
-  if (ACTIVE.size) {
-    const main = [...ACTIVE].filter(k => k.indexOf('g4_') !== 0);   // 1d 型的门
-    const four = [...ACTIVE].filter(k => k.indexOf('g4_') === 0);   // 4H 型的门（键带 g4_ 前缀）
-    if (main.length) list = list.filter(c => main.every(k => c.gates && c.gates[k]));
-    if (four.length) list = list.filter(c => c.sig4 && four.every(k => c.sig4.gates[k.slice(3)]));
-  }
+  if (ACTIVE.size) list = list.filter(c => [...ACTIVE].every(k => c.gates && c.gates[k]));
   return list.slice().sort(byPriority);
 }
 function buildFilters() {
@@ -380,39 +337,6 @@ function buildFilters() {
     b.onclick = () => req ? flashLock(`${i + 1}${g.label} 是必选条件，不可取消`) : toggleGate(g.key);
     el.appendChild(b);
   });
-
-  // —— 分隔 + 「4H型」一键开关 + 四道 4H 专属门（2026-09-21 新增）——
-  const sep = document.createElement('span');
-  sep.className = 'sep';
-  el.appendChild(sep);
-
-  const allOn = GATES4.every(x => ACTIVE.has(x.key));
-  const ab = document.createElement('button');
-  ab.className = 'fbtn f4' + (allOn ? ' on' : '');
-  ab.id = 'g4all';
-  ab.title = '「4H 型」口径：4h 结构定方向（1h 须同向）· 贴 4h 关键位 ±1.5% · ' +
-    '4h SRSI 同向极端 · 1h/1d SRSI 不反向极端（固定门与 1d 型相同）｜' +
-    `点击${allOn ? '取消' : '一键筛出'}（当前成立 ${G4_SIG.n} 个）`;
-  ab.innerHTML = `<span class="f4tag">4H型</span>${allOn ? '成立' : '一键筛出'} <span class="fbadge">${G4_SIG.n}</span>`;
-  ab.onclick = toggle4All;
-  el.appendChild(ab);
-
-  GATES4.forEach(g => {
-    const on = ACTIVE.has(g.key);
-    const b = document.createElement('button');
-    b.className = 'fbtn f4' + (on ? ' on' : '');
-    b.dataset.gate4 = g.key;
-    b.title = `${g.note}｜点击${on ? '取消' : '加入'}筛选（与 ①②③ 为「且」关系）`;
-    b.innerHTML = `${g.label} <span class="fbadge">${G4_CNT[g.f] || 0}</span>`;
-    b.onclick = () => toggleGate(g.key);
-    el.appendChild(b);
-  });
-}
-/* 「4H型」一键开关：全选 / 全取消四道 4H 门 */
-function toggle4All() {
-  if (GATES4.every(x => ACTIVE.has(x.key))) GATES4.forEach(x => ACTIVE.delete(x.key));
-  else GATES4.forEach(x => ACTIVE.add(x.key));
-  syncAllBtn(); buildFilters(); paint();
 }
 function flashLock(msg) {
   const el = document.getElementById('lockmsg');
@@ -447,7 +371,7 @@ function paint() {
   document.getElementById('hitv').textContent = list.length;
   document.getElementById('totv').textContent = BASE.length;
   if (!list.length) {
-    app.innerHTML = `<div class="msg">当前没有符合条件的币。<br>（必选门后剩 ${BASE.length} 个；可取消 ①②③ 或 4H型 的筛选，或点「只看满足条件」一键全选）</div>`;
+    app.innerHTML = `<div class="msg">当前没有符合条件的币。<br>（必选门后剩 ${BASE.length} 个；可取消 ①-④ 的筛选，或点「只看满足条件」一键全选）</div>`;
     return;
   }
   list.forEach(render);
@@ -474,34 +398,23 @@ function load() {
         _fixed: fixed.indexOf(c.name) >= 0,
         _pushed: pushedNames.has(c.name)
       }));
-      // 预计算：通过门数 + 加权得分（排序用）+ 4H 四门通过数；再按必选门筛出展示池 BASE，
+      // 预计算：通过门数 + 加权得分（排序用）；再按必选门筛出展示池 BASE，
       // 按钮角标统计的是「BASE 内有多少通过该门」，这样数字才有参考意义。
       GATES.forEach(g => { GATE_CNT[g.key] = 0; });
-      GATES4.forEach(g => { G4_CNT[g.f] = 0; });
-      COINS.forEach(c => {
-        c._pass = gatePass(c);
-        c._score = gateScore(c);
-        c._pass4 = GATES4.filter(x => c.sig4 && c.sig4.gates[x.f]).length;
-      });
+      COINS.forEach(c => { c._pass = gatePass(c); c._score = gateScore(c); });
       BASE = COINS.filter(c => REQ_KEYS.every(k => c.gates && c.gates[k]));
-      BASE.forEach(c => {
-        GATES.forEach(g => { if (c.gates[g.key]) GATE_CNT[g.key]++; });
-        GATES4.forEach(g => { if (c.sig4 && c.sig4.gates[g.f]) G4_CNT[g.f]++; });
-      });
-      G4_SIG.n = BASE.filter(c => c.sig4 && c.sig4.ok).length;
+      BASE.forEach(c => GATES.forEach(g => { if (c.gates[g.key]) GATE_CNT[g.key]++; }));
       const sigs = COINS.filter(c => c.signal).length;
-      const sig4all = COINS.filter(c => c.sig4 && c.sig4.ok).length;
-      gen.textContent = `生成于 ${d.generated_at} · 扫描 ${COINS.length} 个币 · 通过必选 ${BASE.length} 个 · 1d型 ${sigs} 个 · 4H型 ${sig4all} 个`;
+      gen.textContent = `生成于 ${d.generated_at} · 扫描 ${COINS.length} 个币 · 通过必选 ${BASE.length} 个 · 满足全部条件 ${sigs} 个`;
       buildFilters();
       syncAllBtn();
       const p = d.params || {};
       document.querySelector('.note').innerHTML =
         `数据由云端每 15 分钟生成一次（快照，非实时）· 涨绿跌红 · 页面不依赖任何外部服务，受限网络也能打开<br>` +
         `金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>` +
-        `<b>1d 型</b>（回调/趋势）：ADX&gt;${p.ADX} · ATR/价 ${p.ATR[0]}-${p.ATR[1]}% · 1d 结构定方向 · ` +
-        `贴日线关键位 ±${p.LEVEL_PCT}% · SRSI 同向极端 · 空间&gt;${p.SPACE_MIN}%<br>` +
-        `<b>4H 型</b>：同一套 ADX / ATR / 空间门 + 4h 结构定方向（1h 须同向）· 贴 4h 关键位 ±${p.LEVEL_PCT}% · ` +
-        `4h SRSI 同向极端 · 1h 与 1d SRSI 均不反向极端`;
+        `<b>统一策略</b>（与推送口径同源）：① 1日与1小时方向一致 ② 日线在关键位置 ±${p.LEVEL_PCT}% ` +
+        `③ 日线 SRSI 超买超卖位（多&lt;${p.SRSI[0]} / 空&gt;${p.SRSI[1]}） ④ 4小时 SRSI 不在反向极值<br>` +
+        `<b>固定门</b>：ADX&gt;${p.ADX} · ATR/价 ${p.ATR[0]}-${p.ATR[1]}% · 空间&gt;${p.SPACE_MIN}%`;
       paint();
     })
     .catch(e => {

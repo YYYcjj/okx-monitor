@@ -1,36 +1,25 @@
 #!/usr/bin/env python3
 """
-TrendWatch —— 统一顺势信号扫描（2026-09-05 改版）
+TrendWatch —— 统一顺势信号扫描（2026-09-22 起为**单一策略**）
 
-核心逻辑（2026-09-20 回到 V2：1d 结构定方向 + 空间 >10%；1h/4h 结构不参与过滤）：
-    在 1 日线关键位置找机会：1d 结构定方向 + SRSI 同向极端 + 空间 >10% 即触发；
-    其余（ATR 0.5%-2%、1h/4h/15m 结构标注、TOP_N 等）都是筛选条件。
+策略一句话：**以日线为锚（方向 + 位置 + 触发），1 小时确认方向，4 小时做反向保险。**
+（2026-09-22 按用户要求，把原先并列的「1d 型（回调/趋势）」与「4H 型」合并成这一套。）
 
-两类触发（方向均由 1d 结构决定，横盘 0 淘汰）：
-    回调：1d SRSI 极端（1d 多结构+SRSI<20→多；1d 空结构+SRSI>80→空）
-    趋势：1h SRSI 极端（1h SRSI<20→多；1h SRSI>80→空）
-共用要求（不满足即剔除）：
-    - 方向 = 1d 结构方向（横盘 0 淘汰）
-    - 价格贴近日线关键位（做多近 swing low 支撑 / 做空近 swing high 阻力，距离 <=1.5% 双向贴靠）
-    - 1h ADX>20、ATR/价 在 (0.5%, 2%)
-    - 目标空间 > MIN_SPACE_PCT(10%)（2026-09-13 新增；2026-09-10 移除的插针门仍不启用）
-    （1h/4h 结构仅供展示、不参与过滤：2026-09-19 曾恢复 1h 同向门，2026-09-20 按用户选择撤销，回到 V2 口径）
-保险：任一侧反向极端即剔除（做多时 1h/1d 均不>80；做空时均不<20）
+固定门（系统既有质量门，不变）：
+    1h ADX > ADX_THRESHOLD(20) ｜ ATR/价 ∈ (0.5%, 2%) ｜ 目标空间 > MIN_SPACE_PCT(10%)
+    （目标取日线最近 swing 高/低；空间 = 目标到现价）
 
-「4H 型」第二类信号（2026-09-21 新增，与上面的 1d 型并列；判定见 tw_calc.classify_4h）：
-    固定条件不变（同样要求 1h ADX>20、ATR/价 0.5-2%、目标空间 >10%），
-    但方向锚与位置换成 4h：
-      - 4h 结构定方向，且 1h 结构同向（1h、4h 方向相同）
-      - 价格贴近 4h 关键位（多贴 4h swing low / 空贴 4h swing high，±1.5%）
-      - 4h SRSI 同向极端触发（多 <20 / 空 >80）
-      - 保险：1h SRSI 与 **1d SRSI** 均不得处于反向极端（多不>80 / 空不<20）
-    去重键为「币种|4H多/空」，与 1d 型的键互不冲突（同一币两种类型可各自推送一次）。
-15m 共振：仅标注「★推荐」（15m 结构与信号同向），不再过滤，帮助优先关注。
-推送上限：每日最多前 TOP_N 个（回调优先于趋势、多优先于空、推荐优先、SRSI 越极端越靠前）。
-目标位与空间（目标位仅展示；空间参与过滤）：做多取日线最近 swing high、做空取最近 swing low。
+策略四条件（须全部满足；判定见 tw_calc.classify）：
+    ① 1日与1小时方向一致：日线结构非横盘，且 1h 结构与日线同向（任一横盘 / 方向相反 → 淘汰）
+    ② 日线在关键位置：做多贴日线 swing low（支撑）/ 做空贴日线 swing high（阻力），±1.5%
+    ③ 日线 SRSI 超买超卖位：做多 s1 < 20 / 做空 s1 > 80（触发条件）
+    ④ 4小时 SRSI 不在反向极值：做多 s4h ≤ 80 / 做空 s4h ≥ 20（保险）
 
+15m 共振：仅标注「★推荐」（15m 结构与信号同向），不过滤，帮助优先关注。
+推送上限：每日最多前 TOP_N 个（多优先于空 → 推荐优先 → 日线 SRSI 越极端越靠前）。
+目标位与空间：目标位（日线最近 swing 高/低）仅展示，空间参与过滤。
 扫描池：成交量前 100 的 USDT 永续合约。
-去重：同一 CST 日期内同一「币种 + 类型 + 方向」只推送一次（状态存于 pushed_state.json）。
+去重：同一 CST 日期内同一「币种 + 方向」只推送一次（key =「币种|日线多/空」，状态存于 pushed_state.json）。
 股票相关币种（代币化股票 + 名称含股票关键词）已加入黑名单，扫描时跳过、不推送（2026-08-25）。
 """
 
@@ -64,7 +53,7 @@ def main():
             continue
         c1d = get_candles(s, "1D", 200)
         c1h = get_candles(s, "1H", 100)
-        c4h = get_candles(s, "4H", 200)   # 「4H 型」信号用（2026-09-21 新增）
+        c4h = get_candles(s, "4H", 100)   # 4h 只用于「SRSI 不反向极值」这道保险门（2026-09-22 起不再用于方向/关键位）
         if not c1d or not c1h:
             continue
         closes1 = [c["c"] for c in c1d]
@@ -82,64 +71,48 @@ def main():
         s1h = srsi_last(kv1h)
         if s1 is None or s1h is None:
             continue
-        # 4h 指标（仅「4H 型」判定用，2026-09-21 新增）：SRSI 末值 / 结构方向 / swing 点
-        s4h = None
-        d4h, sh4h, sl4h = 0, [], []
+        # 4h：SRSI 末值（保险门）+ 结构方向（仅卡片展示，不参与判定）
+        s4h, d4h = None, 0
         if c4h:
-            closes4h = [c["c"] for c in c4h]
-            highs4h = [c["h"] for c in c4h]
-            lows4h = [c["l"] for c in c4h]
-            kv4 = calc_stoch_rsi_series(closes4h)
+            kv4 = calc_stoch_rsi_series([c["c"] for c in c4h])
             s4h = srsi_last(kv4) if kv4 else None
-            if s4h is not None:
-                d4h = structure_dir(highs4h, lows4h, min_pct=MIN_SWING_PCT_4H)
-                sh4h, sl4h = find_swings(highs4h, lows4h, p=SWING_P)
+            d4h = structure_dir([c["h"] for c in c4h], [c["l"] for c in c4h],
+                                min_pct=MIN_SWING_PCT_4H)
         # 质量门指标（1h）
         atr1h = calc_atr(highs1h, lows1h, closes1h)
         adx1h = calc_adx(highs1h, lows1h, closes1h)
         if atr1h is None or adx1h is None:
             continue
         atr_ratio = atr1h / closes1h[-1] if closes1h[-1] > 0 else 0.0
-        # 结构方向（1d 找机会+定方向；1h/15m 仅标注，不参与过滤）
+        # 结构方向：1d 与 1h 是**过滤依据**（须同向）；4h/15m 仅展示/标注
         d1h = structure_dir(highs1h, lows1h, min_pct=MIN_SWING_PCT_1H)
         d1d = structure_dir(highs1d, lows1d, min_pct=MIN_SWING_PCT_1D)
         # 日线 swing 点：关键位与参考目标
         sh1d, sl1d = find_swings(highs1d, lows1d, p=SWING_P)
-        # —— 两类信号一起判定 ——
-        #   1d 型：classify()，方向由 1d 结构定（回调 / 趋势）
-        #   4H 型：classify_4h()，方向由 4h 结构定（1h 须同向），固定条件与 1d 型一致
-        hits = []
-        res = classify(s1, s1h, adx1h, atr_ratio, d1d,
+        # —— 单一策略判定（tw_calc.classify）——
+        res = classify(s1, s1h, s4h, adx1h, atr_ratio, d1d, d1h,
                        closes1[-1], sh1d, sl1d)
-        if res:
-            hits.append(res)
-        if s4h is not None:
-            res4 = classify_4h(s4h, s1, s1h, d4h, d1h, adx1h, atr_ratio,
-                               closes1[-1], sh4h, sl4h, sh1d, sl1d)
-            if res4:
-                hits.append(res4)
-        if not hits:
+        if not res:
             continue
-        # 15m 共振（仅标注，不再作为过滤门槛）：与信号同向(多=HH/HL，空=LH/LL)则标「推荐」
-        # 同一币的多个信号类型共用这一次取数
+        kind, dirn, extra = res
+        # 15m 共振（仅标注，不作为过滤门槛）：与信号同向(多=HH/HL，空=LH/LL)则标「推荐」
         c15 = get_candles(s, "15m", 100)
         d15m = 0
         if c15:
             d15m = structure_dir([c["h"] for c in c15], [c["l"] for c in c15],
                                  min_pct=MIN_SWING_PCT_15M)
-        for kind, dirn, extra in hits:
-            rec = (d15m == (1 if dirn == "多" else -1))
-            cands.append({
-                "name": name, "kind": kind, "dir": dirn,
-                "s1": round(s1, 1), "s1h": round(s1h, 1),
-                "s4h": None if s4h is None else round(s4h, 1),
-                "d1h": d1h, "d4h": d4h, "d1d": d1d, "d15m": d15m, "rec": rec,
-                "adx": round(adx1h, 1), "atrr": atr_ratio,
-                "price": closes1[-1],
-                "tgt": extra.get("tgt"),
-                "space_pct": extra.get("space_pct"),
-                "space_atr": extra.get("space_atr"),
-            })
+        rec = (d15m == (1 if dirn == "多" else -1))
+        cands.append({
+            "name": name, "kind": kind, "dir": dirn,
+            "s1": round(s1, 1), "s1h": round(s1h, 1),
+            "s4h": None if s4h is None else round(s4h, 1),
+            "d1h": d1h, "d4h": d4h, "d1d": d1d, "d15m": d15m, "rec": rec,
+            "adx": round(adx1h, 1), "atrr": atr_ratio,
+            "price": closes1[-1],
+            "tgt": extra.get("tgt"),
+            "space_pct": extra.get("space_pct"),
+            "space_atr": extra.get("space_atr"),
+        })
         time.sleep(0.05)
 
     print(f"Skipped stock-related symbols: {skipped_stock}")
@@ -149,7 +122,7 @@ def main():
         if os.path.exists(tp):
             token = open(tp).read().strip()
 
-    # 同日去重：键为「币种|类型方向」，同一币当天可分别推回调与趋势
+    # 同日去重：键为「币种|类型方向」（单类型后即「币种|日线多/空」），同一币当天同一方向只推一次
     def _dedup_key(c):
         return f"{c['name']}|{c['kind']}{c['dir']}"
     pushed = load_pushed()
@@ -157,15 +130,13 @@ def main():
     if cands and not new_cands:
         print(f"All {len(cands)} signal(s) already pushed today, skip.")
 
-    # 排序：回调 → 趋势 → 4H；组内多在前、空在后；同组内「推荐」优先；
-    #       再按触发侧 SRSI 极端度排（越极端越靠前）：回调看 1d，趋势看 1h，4H 看 4h
+    # 排序：多在前、空在后 → 「推荐」优先 → 日线 SRSI 越极端越靠前
+    #       （单类型后不再有类型分组；触发依据就是日线 SRSI）
     def _sort_key(x):
-        k = {"回调": 0, "趋势": 1, "4H": 2}.get(x["kind"], 3)
         base = 0 if x["dir"] == "多" else 1
         rec = 0 if x["rec"] else 1
-        v = (x["s1"] if x["kind"] == "回调"
-             else x["s4h"] if x["kind"] == "4H" else x["s1h"])
-        return (k, base, rec, v if x["dir"] == "多" else -v)
+        v = x["s1"]
+        return (base, rec, v if x["dir"] == "多" else -v)
     new_cands.sort(key=_sort_key)
     if len(new_cands) > TOP_N:
         print(f"Cap to top {TOP_N} (from {len(new_cands)}).")
@@ -175,15 +146,11 @@ def main():
         print(f"\nNEW SIGNALS({len(new_cands)}):")
         for r in new_cands:
             rec_tag = " [推荐]" if r["rec"] else ""
-            if r["kind"] == "4H":
-                srsis = f"SRSI(1d/1h/4h)={r['s1']}/{r['s1h']}/{r['s4h']}"
-                struct = f"结构(4h/1h/1d)={r['d4h']}/{r['d1h']}/{r['d1d']}"
-            else:
-                srsis = f"SRSI(1d/1h)={r['s1']}/{r['s1h']}"
-                struct = f"结构(1h/1d/15m)={r['d1h']}/{r['d1d']}/{r['d15m']}"
             line = (f"  [{r['kind']}]{rec_tag} {r['name']} {r['dir']} "
-                    f"{srsis} ADX(1h)={r['adx']:.0f} "
-                    f"ATR/价={r['atrr']*100:.2f}% {struct} price={r['price']}")
+                    f"SRSI(1d/1h/4h)={r['s1']}/{r['s1h']}/{r['s4h']} ADX(1h)={r['adx']:.0f} "
+                    f"ATR/价={r['atrr']*100:.2f}% "
+                    f"结构(1d/1h/4h/15m)={r['d1d']}/{r['d1h']}/{r['d4h']}/{r['d15m']} "
+                    f"price={r['price']}")
             if r["tgt"] is not None and r["space_pct"] is not None:
                 if r["space_pct"] >= 0:
                     line += f" | 目标={r['tgt']} 空间=+{r['space_pct']:.1f}%"
@@ -195,15 +162,16 @@ def main():
 
     if token and new_cands:
         h = '<div style="font-family:-apple-system,sans-serif;max-width:560px">' 
-        h += '<h3 style="margin:0 0 6px">TrendWatch（回调 / 趋势 / 4H）</h3>'
+        h += '<h3 style="margin:0 0 6px">TrendWatch（日线关键位 · 1d/1h 同向）</h3>'
         h += (f'<div style="font-size:11px;color:#666;margin-bottom:6px">'
-              f'<b>回调/趋势</b>：1d 定方向 + 贴日线关键位 + SRSI 同向极端（回调看 1d、趋势看 1h）｜ '
-              f'<b>4H</b>：4h 定方向（1h 同向）+ 贴 4h 关键位 + 4h SRSI 极端 + 1h/1d 不反向极端 ｜ '
+              f'<b>策略</b>：① 1日与1小时方向一致 ② 日线在关键位置（±{NEAR_LEVEL_PCT*100:.1f}%）'
+              f' ③ 日线 SRSI 超买超卖位（多&lt;{SRSI_LOW} / 空&gt;{SRSI_HIGH}）'
+              f' ④ 4小时 SRSI 不在反向极值 ｜ '
               f'质量门：ADX&gt;{ADX_THRESHOLD} &amp; ATR/价 {ATR_MIN_RATIO*100:.1f}-{ATR_MAX_RATIO*100:.0f}% &amp; 空间&gt;{MIN_SPACE_PCT:.0f}% ｜ '
               f'每日前 {TOP_N} 个　共 {len(new_cands)} 个</div>')
         for r in new_cands:
             color = "#27ae60" if r["dir"] == "多" else "#e74c3c"
-            kcolor = {"回调": "#185fa5", "趋势": "#b8860b", "4H": "#7b4fb5"}.get(r["kind"], "#666")
+            kcolor = "#7b4fb5"   # 单类型（日线锚定）统一紫色，与走势图页一致
             inst = f"{r['name']}-USDT-SWAP"
             p = fmt_p(r["price"], inst)
             dirmap = {1: "上行↑", -1: "下行↓", 0: "横盘"}
@@ -219,28 +187,19 @@ def main():
                   f'<span style="color:{kcolor};font-size:12px">[{r["kind"]}]</span> '
                   f'<span style="color:{color};font-size:12px;font-weight:bold">{r["dir"]}</span> '
                   f'<span style="font-size:11px;color:#666">{p}</span></div>')
-            # 第二行：SRSI（触发依据）——4H 型额外显示 4h 值并标出触发侧
-            if r["kind"] == "4H":
-                h += (f'<div style="font-size:12px;color:#333;margin-top:5px">SRSI '
-                      f'1d <b>{r["s1"]:.1f}</b> / 1h <b>{r["s1h"]:.1f}</b> / '
-                      f'<b style="color:{kcolor}">4h {r["s4h"]:.1f}</b>'
-                      f'<span style="color:#888;font-size:11px"> ← 触发</span></div>')
-            else:
-                h += (f'<div style="font-size:12px;color:#333;margin-top:5px">SRSI '
-                      f'<b>1d {r["s1"]:.1f}</b> / <b>1h {r["s1h"]:.1f}</b></div>')
-            # 第三行：结构 + 方向（1d 型以 1d 为过滤依据；4H 型以 4h / 1h 为依据）
-            if r["kind"] == "4H":
-                h += (f'<div style="font-size:12px;color:#333;margin-top:2px">结构 '
-                      f'4h <b>{dirmap.get(r["d4h"], r["d4h"])}</b> · '
-                      f'1h <b>{dirmap.get(r["d1h"], r["d1h"])}</b> · '
-                      f'1d <b>{dirmap.get(r["d1d"], r["d1d"])}</b> '
-                      f'｜ 方向 <b style="color:{color}">{r["dir"]}</b></div>')
-            else:
-                h += (f'<div style="font-size:12px;color:#333;margin-top:2px">结构 '
-                      f'1d <b>{dirmap.get(r["d1d"], r["d1d"])}</b> · '
-                      f'1h <b>{dirmap.get(r["d1h"], r["d1h"])}</b> · '
-                      f'15m <b>{dirmap.get(r["d15m"], r["d15m"])}</b> '
-                      f'｜ 方向 <b style="color:{color}">{r["dir"]}</b></div>')
+            # 第二行：SRSI —— 1d 是触发（标出），1h 是方向确认，4h 是反向保险
+            s4txt = "—" if r["s4h"] is None else f'{r["s4h"]:.1f}'
+            h += (f'<div style="font-size:12px;color:#333;margin-top:5px">SRSI '
+                  f'<b style="color:{kcolor}">1d {r["s1"]:.1f}</b>'
+                  f'<span style="color:#888;font-size:11px"> ← 触发</span>'
+                  f' / 1h <b>{r["s1h"]:.1f}</b> / 4h <b>{s4txt}</b></div>')
+            # 第三行：结构 + 方向（1d、1h 是过滤依据，4h/15m 仅展示与标注）
+            h += (f'<div style="font-size:12px;color:#333;margin-top:2px">结构 '
+                  f'1d <b>{dirmap.get(r["d1d"], r["d1d"])}</b> · '
+                  f'1h <b>{dirmap.get(r["d1h"], r["d1h"])}</b> · '
+                  f'4h <b>{dirmap.get(r["d4h"], r["d4h"])}</b> · '
+                  f'15m <b>{dirmap.get(r["d15m"], r["d15m"])}</b> '
+                  f'｜ 方向 <b style="color:{color}">{r["dir"]}</b></div>')
             # 第四行：ADX + ATR/价（质量门）
             h += (f'<div style="font-size:12px;color:#333;margin-top:2px">'
                   f'ADX(1h) <b>{r["adx"]:.0f}</b> ｜ ATR/价 <b>{r["atrr"]*100:.2f}%</b></div>')

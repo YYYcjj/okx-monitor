@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-TrendWatch 走势图数据生成（2026-09-20 重写）
+TrendWatch 走势图数据生成（2026-09-22 更新为**统一策略**口径）
 
 用途：为 gh-pages 上的走势图页面（charts.html）生成 charts_data.json。
 要点：
   1. 指标一律复用 tw_calc / tw_conf（与推送口径同源，避免两套逻辑分叉）。
-  2. 判定口径 = 当前生效的 **V2**：ADX(1h)>20 → ATR/价 0.5-2% → 1d 结构定方向
-     → 贴日线关键位 ±1.5% → SRSI 同向极端 → 目标空间 >10%；1h/4h 结构仅展示。
+  2. 判定口径 = 2026-09-22 起生效的**单一策略**（与 tw_calc.classify 一一对应，仅拆开展示）：
+       固定门：ADX(1h)>20 ｜ ATR/价 0.5-2% ｜ 目标空间 >10%（目标取日线最近 swing 高/低）
+       ① 1日与1小时方向一致   ② 日线在关键位置（±1.5% 贴日线 swing 低/高）
+       ③ 日线 SRSI 超买超卖位  ④ 4小时 SRSI 不在反向极值
   3. 页面**不发任何外部请求**：K 线、SRSI、当日已推送列表全部内嵌，
      所以手机/受限网络下也能打开（这是它和浏览器直连版的根本区别）。
   4. 输出做数值压缩（5 位有效数字 + 精简分隔符），100 币约 1.5-2 MB。
@@ -14,10 +16,9 @@ TrendWatch 走势图数据生成（2026-09-20 重写）
 每个币输出：
   - 1D / 4H / 1H K 线（最近 90 根，升序，[ts_sec, o, h, l, c]）
   - SRSI 1d / 1h 序列（需右对齐到对应 K 线末端）
-  - ADX(1h)、ATR/价、四周期结构方向（1d/4h/1h/15m）
+  - ADX(1h)、ATR/价、SRSI 三周期末值（1d/1h/4h）、四周期结构方向（1d/4h/1h/15m）
   - 日线 swing 高/低点（价位 + 时间）
-  - 六道门的逐门通过情况 + 信号类型/方向/目标位/空间
-  - `sig4`：「4H 型」逐门结果（2026-09-21 新增；固定门复用上面三个，另给 4h 专属四门）
+  - 七道门的逐门通过情况 + 方向 / 目标位 / 空间
 
 币种范围：固定监控 7 币 + 当日已推送 + 成交额前 100（去重，固定币在前）。
 """
@@ -36,8 +37,8 @@ from tw_conf import (OKX, SWING_P, ADX_THRESHOLD, ATR_MIN_RATIO, ATR_MAX_RATIO,
 from tw_calc import (calc_stoch_rsi_series, srsi_last, calc_atr, calc_adx,
                      structure_dir, find_swings, near_key_level)
 
-# 注：4h 结构摆幅阈值 MIN_SWING_PCT_4H 原为**本文件局部定义**（当时 4h 不参与判定）；
-# 2026-09-21 「4H 型」信号启用后已回归 tw_conf.py，这里改为导入，避免两份定义分叉。
+# 注：`s4h`（4h SRSI）现在是**统一策略的第四道门（反向极值保险）**，因此随本文件输出；
+# 4h 结构方向（d4h）只用 MIN_SWING_PCT_4H 算出来做展示，不参与判定。
 
 
 FIXED = ["ORDI", "PUMP", "HUMA", "WLD", "APR", "BTC", "APT"]   # 固定监控币
@@ -149,74 +150,44 @@ def build_coin(name):
     d15m = (structure_dir([c[2] for c in m15], [c[3] for c in m15], min_pct=MIN_SWING_PCT_15M)
             if m15 else 0)
     sh1d, sl1d = find_swings(highs1d, lows1d, p=SWING_P)
-    # 4h 侧指标（「4H 型」用，2026-09-21 新增）：SRSI 末值 + swing 点
+    # 4h SRSI 末值（统一策略第四道门「不在反向极值」用；2026-09-22 起参与判定）
     kv4 = calc_stoch_rsi_series([c[4] for c in h4]) if h4 else None
     s4h = srsi_last(kv4) if kv4 else None
-    sh4h, sl4h = (find_swings(highs4h, lows4h, p=SWING_P) if h4 else ([], []))
     price = closes1[-1]
 
-    # ---- 逐门判定（与 tw_calc.classify 的 V2 口径完全一致，仅拆开展示）----
+    # ---- 逐门判定（与 tw_calc.classify 的**统一策略**口径完全一致，仅拆开展示）----
+    # 固定门：ADX>20 ｜ ATR 区间 ｜ 目标空间 >10%（目标取日线最近 swing 高/低）
     adx_ok = adx1h >= ADX_THRESHOLD
     atr_ok = ATR_MIN_RATIO < atr_ratio < ATR_MAX_RATIO
-    dir1d_ok = d1d != 0
-    if dir1d_ok:
+    # ① 1日与1小时方向一致（横盘 / 方向相反 → 不通过）
+    dir_same_ok = (d1d != 0 and d1h == d1d)
+    # ② 日线在关键位置（多贴日线 swing low，空贴日线 swing high，±1.5%）
+    if dir_same_ok:
         levels = [p for _, p in (sl1d[-2:] if d1d == 1 else sh1d[-2:])]
         level_ok = near_key_level(price, levels)
     else:
         level_ok = False
-    if dir1d_ok and d1d == 1:
-        srsi_ok = (s1 <= SRSI_HIGH and s1h <= SRSI_HIGH) and (s1 < SRSI_LOW or s1h < SRSI_LOW)
-        kind = "回调" if s1 < SRSI_LOW else ("趋势" if s1h < SRSI_LOW else None)
-    elif dir1d_ok:
-        srsi_ok = (s1 >= SRSI_LOW and s1h >= SRSI_LOW) and (s1 > SRSI_HIGH or s1h > SRSI_HIGH)
-        kind = "回调" if s1 > SRSI_HIGH else ("趋势" if s1h > SRSI_HIGH else None)
-    else:
-        srsi_ok, kind = False, None
+    # ③ 日线 SRSI 超买超卖位（多 <20 / 空 >80）
+    srsi1d_ok = dir_same_ok and ((s1 < SRSI_LOW) if d1d == 1 else (s1 > SRSI_HIGH))
+    # ④ 4小时 SRSI 不在反向极值（多 ≤80 / 空 ≥20）；4h 数据缺失视为不通过
+    not_rev4h_ok = bool(dir_same_ok and s4h is not None and
+                        (s4h <= SRSI_HIGH if d1d == 1 else s4h >= SRSI_LOW))
 
+    # 目标位与空间（按日线方向取）
     target = None
-    if dir1d_ok:
-        target = (sh1d[-1][1] if (d1d == 1 and sh1d)
-                  else (sl1d[-1][1] if (d1d == -1 and sl1d) else None))
+    if d1d == 1 and sh1d:
+        target = sh1d[-1][1]
+    elif d1d == -1 and sl1d:
+        target = sl1d[-1][1]
     space_pct = None
     if target and price > 0:
         sp = (target - price) / price if d1d == 1 else (price - target) / price
         space_pct = sp * 100.0
     space_ok = space_pct is not None and space_pct > MIN_SPACE_PCT
 
-    # ---- 「4H 型」逐门判定（2026-09-21 新增；与 tw_calc.classify_4h 口径完全一致，仅拆开展示）----
-    # 固定门 adx / atr / space 与 1d 型共用；4h 专属四门：
-    #   dir  ：4h 结构非横盘 且 1h 结构同向（1h、4h 方向相同）
-    #   level：价格贴 4h 关键位 ±1.5%（多贴 4h swing low / 空贴 4h swing high）
-    #   srsi ：4h SRSI 同向极端（多<20 / 空>80）
-    #   rev  ：1h SRSI 与 1d SRSI 均不反向极端（多不>80 / 空不<20）
-    dir4_ok = (d4h != 0 and d1h == d4h)
-    if dir4_ok:
-        lv4 = [p for _, p in (sl4h[-2:] if d4h == 1 else sh4h[-2:])]
-        level4_ok = near_key_level(price, lv4)
-        if d4h == 1:
-            srsi4_ok = s4h is not None and s4h < SRSI_LOW
-            rev4_ok = (s1h <= SRSI_HIGH and s1 <= SRSI_HIGH)
-        else:
-            srsi4_ok = s4h is not None and s4h > SRSI_HIGH
-            rev4_ok = (s1h >= SRSI_LOW and s1 >= SRSI_LOW)
-    else:
-        level4_ok = srsi4_ok = rev4_ok = False
-    # 目标位与空间：同样取日线最近 swing 高/低，但按 **4h 方向** 取
-    target4 = None
-    if d4h == 1 and sh1d:
-        target4 = sh1d[-1][1]
-    elif d4h == -1 and sl1d:
-        target4 = sl1d[-1][1]
-    space4_pct = None
-    if target4 and price > 0:
-        sp4 = (target4 - price) / price if d4h == 1 else (price - target4) / price
-        space4_pct = sp4 * 100.0
-    space4_ok = space4_pct is not None and space4_pct > MIN_SPACE_PCT
-    sig4_ok = bool(adx_ok and atr_ok and dir4_ok and level4_ok
-                   and srsi4_ok and rev4_ok and space4_ok)
-
     dir_cn = {1: "多", -1: "空"}.get(d1d)
-    signal = bool(adx_ok and atr_ok and dir1d_ok and level_ok and srsi_ok and space_ok and kind)
+    signal = bool(adx_ok and atr_ok and dir_same_ok and level_ok
+                  and srsi1d_ok and not_rev4h_ok and space_ok)
 
     # SRSI 序列右对齐到对应 K 线末端（长度短于 K 线，页面按下标偏移对齐）
     return {
@@ -226,21 +197,17 @@ def build_coin(name):
         "srsi1h": [round(v, 1) for v in kv1h[-BARS:]],
         "adx1h": round(adx1h, 1), "atr_pct": round(atr_ratio * 100, 2),
         "s1": round(s1, 1), "s1h": round(s1h, 1),
+        "s4h": None if s4h is None else round(s4h, 1),
         "d1d": d1d, "d4h": d4h, "d1h": d1h, "d15m": d15m,
         "sh1d": [[d1[i][0], r5(p)] for i, p in sh1d[-4:]],
         "sl1d": [[d1[i][0], r5(p)] for i, p in sl1d[-4:]],
         "target": r5(target) if target else None,
         "space_pct": None if space_pct is None else round(space_pct, 1),
-        "signal": signal, "kind": kind, "dir": dir_cn,
-        "gates": {"adx": adx_ok, "atr": atr_ok, "dir1d": dir1d_ok,
-                  "level": level_ok, "srsi": srsi_ok, "space": space_ok},
-        # 「4H 型」：固定门（adx/atr/space）复用上面的 gates，4h 专属四门放这里
-        "sig4": {"ok": sig4_ok, "dir": d4h,
-                 "s4h": None if s4h is None else round(s4h, 1),
-                 "tgt": r5(target4) if target4 else None,
-                 "space_pct": None if space4_pct is None else round(space4_pct, 1),
-                 "gates": {"dir": dir4_ok, "level": level4_ok,
-                           "srsi": srsi4_ok, "rev": rev4_ok}},
+        "signal": signal, "kind": "日线", "dir": dir_cn,
+        # 七道门：前四道 = 策略四条件（①②③④），后三道 = 固定门（页面里设为必选）
+        "gates": {"dir_same": dir_same_ok, "level": level_ok,
+                  "srsi1d": srsi1d_ok, "not_rev4h": not_rev4h_ok,
+                  "space": space_ok, "adx": adx_ok, "atr": atr_ok},
     }
 
 
@@ -256,10 +223,9 @@ def main():
         c = build_coin(nm)
         if c:
             coins.append(c)
-            print(f"  {nm}: SRSI {c['s1']}/{c['s1h']}/{c['sig4']['s4h']} ADX {c['adx1h']} "
-                  f"ATR {c['atr_pct']}% 结构 {c['d1d']}/{c['d4h']}/{c['d1h']} "
-                  f"空间 {c['space_pct']} 信号 {'★' if c['signal'] else '-'}"
-                  f"{' 4H★' if c['sig4']['ok'] else ''}", flush=True)
+            print(f"  {nm}: SRSI {c['s1']}/{c['s1h']}/{c['s4h']} ADX {c['adx1h']} "
+                  f"ATR {c['atr_pct']}% 结构 {c['d1d']}/{c['d1h']}/{c['d4h']} "
+                  f"空间 {c['space_pct']} 信号 {'★' if c['signal'] else '-'}", flush=True)
         else:
             fails += 1
             print(f"  {nm}: 数据不足，跳过", flush=True)
@@ -292,9 +258,7 @@ def main():
 
     kb = os.path.getsize("charts_data.json") / 1024
     sigs = sum(1 for c in coins if c["signal"])
-    sigs4 = sum(1 for c in coins if c["sig4"]["ok"])
-    print(f"\nwrote charts_data.json: {len(coins)} coins, {kb:.0f} KB, "
-          f"1d 型命中 {sigs} 个, 4H 型命中 {sigs4} 个")
+    print(f"\nwrote charts_data.json: {len(coins)} coins, {kb:.0f} KB, 统一策略命中 {sigs} 个")
     if kb > 8192:
         raise SystemExit("charts_data.json 超过 8 MB，需下调 BARS 或 SCAN_TOP")
 
