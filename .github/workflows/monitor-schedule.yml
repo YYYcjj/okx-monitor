@@ -91,18 +91,34 @@ jobs:
           name: viewer
           path: pages/
 
-      - name: Deploy to gh-pages
+      # 2026-09-22 修复：gh-pages 现在被多个工作流共用（本文件 + refresh-viewer.yml +
+      # trend-watch.yml 的 charts job），三方都用「孤儿提交 + force push」，
+      # 所以每一方都必须把**对方的文件**带回来再提交，否则会互相删掉。
+      # 原先这里只 git add index.html，一跑就会把 charts.html / charts_data.json 清空。
+      - name: Deploy to gh-pages (keep charts)
         run: |
+          set -e
           mkdir -p /tmp/deploy
           cp pages/viewer.html /tmp/deploy/index.html
           cd /tmp/deploy
-          git init
-          git checkout -b gh-pages
+          git init -q -b gh-pages
           git config user.name "OKX Bot"
           git config user.email "bot@okx.local"
-          git add index.html
-          git commit -m "Deploy viewer" || true
-          git push -f https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git gh-pages 2>/dev/null || echo "Pages push skipped (private repo or Pages not enabled)"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+
+          git fetch --depth=1 origin gh-pages || true
+          for f in charts.html charts_data.json; do
+            if git show "origin/gh-pages:$f" > "$f" 2>/dev/null; then
+              echo "kept $f ($(wc -c < $f) bytes)"
+            else
+              rm -f "$f"
+              echo "no existing $f on gh-pages"
+            fi
+          done
+
+          git add -A
+          git commit -m "Deploy viewer [skip ci]" || true
+          git push -f origin gh-pages 2>/dev/null || echo "Pages push skipped (private repo or Pages not enabled)"
 
   refresh-symbols:
     runs-on: ubuntu-latest
