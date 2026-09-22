@@ -8,22 +8,32 @@ name: OKX Viewer Refresh
 #   没人手动触发 → 页面数据停在 2026-08-10，一个多月没动。
 #   本工作流把「采集 → 生成 → 发布」拆出来单独跑，**只重建页面，不发任何推送**。
 #
+# 触发方式（2026-09-22 定）：
+#   不用 GitHub 自带的 schedule —— 本仓库实测 schedule 会被严重节流（trend-watch 的 */30 曾被拖成几小时一次），
+#   新建的 scheduled workflow 首次触发也迟迟不来。改为挂在 **Trend Candidate Watch 的完成事件**上：
+#   那个工作流由外部 cron-job 每 15 分钟 workflow_dispatch 驱动（节拍稳定、用户已在用），
+#   它一跑完就触达这里，再由下面的时间闸门把实际执行压到「每 2 小时一次」。
+#   好处：沿用已验证的节拍，且本工作流有独立的 concurrency，不会拖慢 TrendWatch 自己。
+#
+# 执行节流：只在 **CST 偶数小时的前 15 分钟内**真正干活（08/10/12/14/16/18/20/22 点各一次）。
+#   15 分钟节拍下，每个偶数小时必定有至少一次落在 0-14 分 → 稳定命中；其余触发直接跳过（只花几秒）。
+#   想改频率/时段，只改 gate 里那一行 if。
+#
 # 为什么不直接恢复 Monitor Schedule 的 schedule：
 #   那条链路会跑 okx_monitor.py 并注入 PUSHPLUS_TOKEN（= 会推送），与「只保留 TrendWatch 推送」的现状冲突。
 #   这里的静默做法有代码依据：okx_monitor.py 的 send_report() / send_high_alert() 在
 #   PUSHPLUS_TOKEN 与 WECOM_WEBHOOK 都为空时**直接 return False**；而写 CSV（save_scan_csv）
 #   与推送彼此独立。所以只要不注入这两个变量，就是「只记录、不打扰」。
 #
-# 注意：gh-pages 被两个工作流共用（本文件 + trend-watch.yml 的 charts job），
-#   两边都用「孤儿提交 + force push」，因此**双方都必须保留对方的文件**，否则会互相删掉。
+# 注意：gh-pages 被多个工作流共用（本文件 + trend-watch.yml 的 charts job + monitor-schedule.yml），
+#   三方都用「孤儿提交 + force push」，因此**每一方都必须保留对方的文件**，否则会互相删掉。
 #   本工作流保留 charts.html / charts_data.json；trend-watch 那边保留 index.html。
 
 on:
-  schedule:
-    # 每 2 小时整点跑一次（CST 09/11/13/15/17/19/21/23）。
-    # 扫描结果按天累加到 okx_data/scans/<日期>.csv，跑得越密，当天样本越细。
-    # 想改成 CST 偶数小时（08/10/.../22）就把下面这行换成：'0 0,2,4,6,8,10,12,14 * * *'
-    - cron: '0 1,3,5,7,9,11,13,15 * * *'
+  workflow_run:
+    # 挂在 TrendWatch 的完成事件上（它由外部 cron-job 每 15 分钟驱动）
+    workflows: ["Trend Candidate Watch"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -34,7 +44,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      run: ${{ steps.g.outputs.run }}
+    steps:
+      - id: g
+        name: Throttle (2h, CST even hours, first 15 min)
+        run: |
+          now=$(TZ=Asia/Shanghai date '+%F %H:%M')
+          H=$(TZ=Asia/Shanghai date +%H)
+          M=$(TZ=Asia/Shanghai date +%M)
+          if [ $((10#$H % 2)) -eq 0 ] && [ $((10#$M)) -lt 15 ]; then
+            echo "run=1" >> $GITHUB_OUTPUT
+            echo "▶ [$now CST] 命中节流窗口（偶数小时前 15 分钟），开始刷新数据查看器"
+          else
+            echo "run=0" >> $GITHUB_OUTPUT
+            echo "⏭ [$now CST] 未到刷新窗口（每 2 小时一次：CST 08/10/12/14/16/18/20/22 点的头 15 分钟），本轮跳过"
+          fi
+
   refresh:
+    needs: gate
+    if: needs.gate.outputs.run == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
