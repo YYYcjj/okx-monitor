@@ -15,7 +15,7 @@ name: OKX Viewer Refresh
 #   它一跑完就触达这里，再由下面的时间闸门把实际执行压到「每 2 小时一次」。
 #   好处：沿用已验证的节拍，且本工作流有独立的 concurrency，不会拖慢 TrendWatch 自己。
 #
-# 执行节流：只在 **CST 偶数小时的前 15 分钟内**真正干活（08/10/12/14/16/18/20/22 点各一次）。
+# 执行节流：只在 **CST 偶数小时的前 15 分钟内**真正干活（08/10/12/14/16/18/20/22 点）。
 #   15 分钟节拍下，每个偶数小时必定有至少一次落在 0-14 分 → 稳定命中；其余触发直接跳过（只花几秒）。
 #   想改频率/时段，只改 gate 里那一行 if。
 #
@@ -85,13 +85,29 @@ jobs:
         id: date
         run: echo "date=$(TZ=Asia/Shanghai date +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
-      # 把当天已采集的 CSV 取回来，这样一天多次运行是**追加**而不是覆盖
-      - name: Download today's existing CSV
-        uses: actions/download-artifact@v4
-        with:
-          name: scan-data-${{ steps.date.outputs.date }}
-          path: okx_data/scans/
-        continue-on-error: true
+      # 把**当天已采集的 CSV** 取回来，这样一天多次扫描是「追加」而不是覆盖。
+      # 为什么不用 actions/download-artifact：它按名字取，而同名 artifact 会随每次运行累积多份
+      # （实测一天 8 份、名字完全相同），v4 遇到重名无法确定取哪份 → 取回失败 → 页面只剩最后一批。
+      # 这里改用 REST API：按 name 过滤、按 created_at 取最新那份，稳定可靠。
+      - name: Restore today's CSV (accumulate)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir -p okx_data/scans
+          DATE=$(TZ=Asia/Shanghai date +%Y-%m-%d)
+          AID=$(curl -s -H "Authorization: Bearer $TOKEN" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=scan-data-${DATE}&per_page=100" \
+            | python3 -c "import json,sys;a=json.load(sys.stdin).get('artifacts',[]);a.sort(key=lambda x:x['created_at'],reverse=True);print(a[0]['id'] if a else '')")
+          if [ -z "$AID" ]; then
+            echo "今天还没有历史 CSV，本轮从零开始"
+            exit 0
+          fi
+          echo "取回今日已有扫描数据：artifact id=$AID"
+          curl -sL -H "Authorization: Bearer $TOKEN" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${AID}/zip" -o /tmp/csv.zip
+          unzip -o /tmp/csv.zip -d okx_data/scans/ >/dev/null
+          echo "取回后行数："; wc -l okx_data/scans/*.csv || true
 
       # 静默扫描：**刻意不注入** PUSHPLUS_TOKEN / WECOM_WEBHOOK
       - name: Scan (record only, no push)
