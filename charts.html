@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<title>TrendWatch 走势图</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;background:#0e0e10;color:#d1d4dc;padding:12px;font-size:13px}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px}
+h1{font-size:16px;font-weight:600}
+.sub{color:#787b86;font-size:11px}
+button{background:#1e222d;color:#d1d4dc;border:1px solid #363a45;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+button:hover{border-color:#5d606b}
+button.on{background:#2962ff;border-color:#2962ff;color:#fff}
+.note{color:#787b86;font-size:11px;margin:4px 0 12px;line-height:1.7}
+.card{background:#131722;border:1px solid #2a2e39;border-radius:8px;margin:10px 0;padding:10px}
+.card.sig{border-color:#3d2f5c}          /* 策略命中（满足七道门）：紫边框 */
+.hd{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.nm{font-size:15px;font-weight:600}
+.px{font-size:13px;color:#b2b5be}
+.tag{font-size:11px;padding:1px 6px;border-radius:4px;font-weight:600}
+/* 涨跌配色：2026-09-21 按用户要求改为 **涨绿跌红**（多=绿、空=红），与推送卡片一致 */
+.t-long{background:#14301f;color:#26a69a;border:1px solid #1f4a35}
+.t-short{background:#3d1d1e;color:#ef5350;border:1px solid #5c2b2b}
+/* 策略命中主色：**紫**（与推送卡片里的「日线锚定」紫色一致） */
+.t-sig{background:#221a33;color:#b18ff0;border:1px solid #3d2f5c}
+.t-fix{background:#1c1f26;color:#9598a1;border:1px solid #2a2e39}
+.metrics{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 6px;font-size:12px;color:#9598a1}
+.metrics b{color:#d1d4dc;font-weight:600}
+.gates{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.chip{font-size:11px;padding:1px 6px;border-radius:4px;background:#1c1f26;color:#787b86;border:1px solid #2a2e39}
+.chip.ok{background:#12281c;color:#4caf7d;border-color:#1f4a35}
+.chip.no{background:#2a1517;color:#e0676b;border-color:#4a2224}
+.tabs{display:flex;gap:4px;margin-bottom:6px}
+.tab{background:#1c1f26;border:1px solid #2a2e39;color:#9598a1;border-radius:5px;padding:2px 10px;font-size:12px;cursor:pointer}
+.tab.on{background:#2962ff;border-color:#2962ff;color:#fff}
+canvas{display:block;width:100%;border-radius:4px}
+.msg{padding:14px;color:#9598a1;font-size:12px;line-height:1.8}
+.err{color:#e0676b}
+.filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 0}
+.fbtn{display:inline-flex;align-items:center;gap:5px;background:#1c1f26;border:1px solid #2a2e39;color:#9598a1;border-radius:6px;padding:3px 9px;font-size:12px;cursor:pointer}
+.fbtn:hover{border-color:#5d606b}
+.fbtn.on{background:#12301f;border-color:#2f7d52;color:#7fd6a5}
+.fnum{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:#2a2e39;color:#c8cbd3;font-size:10px;font-weight:700}
+.fbtn.on .fnum{background:#2f7d52;color:#fff}
+.fbadge{color:#787b86;font-size:11px}
+.fbtn.on .fbadge{color:#a9e3c4}
+/* 必选条件：始终点亮、不可取消 */
+.fbtn.req{border-color:#2f7d52;color:#7fd6a5;background:#12301f;cursor:default}
+.fbtn.req .fnum{background:#2f7d52;color:#fff}
+.fbtn.req .fbadge{color:#a9e3c4}
+.fbtn.req .lock{font-size:10px;color:#7fd6a5}
+.lockmsg{color:#f0b90b;font-size:11px;margin-left:6px}
+.fhint{color:#787b86;font-size:11px;margin:6px 0 12px;line-height:1.6}
+.hit{color:#9598a1}
+.hit b{color:#f0b90b}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>TrendWatch 走势图</h1>
+  <span class="sub" id="gen">加载中…</span>
+  <button id="flt" onclick="toggleAll()">只看满足条件</button>
+</div>
+<div class="note">
+  数据由云端每 15 分钟生成一次（快照，非实时）· 涨绿跌红 · 页面不依赖任何外部服务，受限网络也能打开<br>
+  金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>
+  判定口径与推送一致（<b>统一策略</b>）：① 1小时不与日线反向 ② 日线在关键位置 ±2.5% ③ 日线 SRSI 超买超卖位（多&lt;25 / 空&gt;75） ④ 4小时 SRSI 不在反向极值<br>
+  固定门：ADX&gt;20 · ATR/价 0.5-2% · 空间&gt;10%
+</div>
+
+<!-- 条件筛选：点亮的条件 = 必须通过（多选为「且」关系）；数字 = 优先级；
+     required:true 的条件为「必选」，始终满足且不可取消 -->
+<div class="filters" id="filters"></div>
+<div class="fhint">
+  数字 = 优先级（①最优先）：<b>排序先看「通过条件数」，多的靠前</b>；数量相同时再按优先级加权得分（①7分 ②6分 ③5分 ④4分 ⑤3分 ⑥2分 ⑦1分），仍相同则看目标空间<br>
+  <b>⑤空间&gt;10% · ⑥ADX&gt;20 · ⑦ATR区间 为固定门</b>（必选，始终满足、不可取消）；<b>①-④</b> 是策略四条件，可点击加入筛选
+  <span class="hit">｜ 命中 <b id="hitv">-</b> / 共 <b id="totv">-</b></span>
+  <span class="lockmsg" id="lockmsg"></span>
+</div>
+
+<div id="app"></div>
+
+<script>
+/* K 线涨跌色：2026-09-21 按用户要求改为 **涨绿跌红**（UP=绿、DOWN=红） */
+const UP = '#26a69a', DOWN = '#ef5350';
+const DIRMAP = { 1: '上行↑', '-1': '下行↓', 0: '横盘' };
+
+/* 七道门（数组顺序即优先级，weight 用于同门数时的加权排序）。
+   ①-④ = 策略四条件（可点击筛选）；⑤-⑦ = 固定质量门（必选，始终满足、不可取消）。
+   优先级依据策略语义：先方向、再位置、再触发/保险，最后是空间与动能/波动这类质量门。
+   required:true = 必选条件（始终满足、页面上不可取消）。
+   改优先级/必选项只需调整本数组（序号、按钮、角标、排序都会自动跟随）。 */
+const GATES = [
+  { key: 'dir1h',     label: '1h不反向',    weight: 7, note: '1h 结构不与日线反向（横盘或同向放行，日线横盘淘汰）' },
+  { key: 'level',     label: '贴关键位',    weight: 6, note: '价格贴日线 swing 高/低 ±2.5%' },
+  { key: 'srsi1d',    label: '1d SRSI极端', weight: 5, note: '日线 SRSI 超买超卖位（多<25 / 空>75）' },
+  { key: 'not_rev4h', label: '4h不反向',    weight: 4, note: '4h SRSI 不在反向极值（多≤80 / 空≥20）' },
+  { key: 'space',     label: '空间>10%',    weight: 3, note: '目标位到现价的空间', required: true },
+  { key: 'adx',       label: 'ADX>20',      weight: 2, note: '1h 趋势动能', required: true },
+  { key: 'atr',       label: 'ATR区间',     weight: 1, note: 'ATR/价 0.5-2%', required: true }
+];
+const REQ_KEYS = GATES.filter(g => g.required).map(g => g.key);   // 必选门
+const GATE_CNT = {};                 // 每道门在「必选过滤后」通过多少币（按钮角标）
+const ACTIVE = new Set();            // 点亮的可选门 = 必须通过
+let DATA = null, COINS = [], BASE = [];   // BASE = 通过全部必选门的币（展示池）
+let io = null;
+const drawn = new Set();
+
+function fmtP(p) {
+  if (p >= 1000) return p.toFixed(1);
+  if (p >= 1) return p.toFixed(2);
+  if (p >= 0.01) return p.toFixed(4);
+  return p.toPrecision(4);
+}
+function fmtDate(ts) {
+  const d = new Date((ts + 8 * 3600) * 1000);          // 转 CST 显示
+  const p = n => String(n).padStart(2, '0');
+  return p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+}
+
+/* ---------------- 自绘 K 线 + StochRSI ---------------- */
+const PAD = { t: 10, b: 16, l: 6, r: 54 };
+const PRICE_H = 186, GAP = 26, SRSI_H = 78;
+
+function drawChart(cv) {
+  const coin = cv._coin, tf = cv._tf || '1D';
+  const rows = (tf === '1D' ? coin.d1 : tf === '4H' ? coin.h4 : coin.h1) || [];
+  const vals = (tf === '1D' ? coin.srsi1d : coin.srsi1h) || [];
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = Math.max(200, cv.clientWidth || cv.parentElement.clientWidth || 320);
+  const cssH = PAD.t + PRICE_H + GAP + SRSI_H + PAD.b;
+  cv.width = Math.round(cssW * dpr); cv.height = Math.round(cssH * dpr);
+  cv.style.height = cssH + 'px';
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#131722'; g.fillRect(0, 0, cssW, cssH);
+  g.font = '10px -apple-system,sans-serif';
+
+  const x0 = PAD.l, x1 = cssW - PAD.r;
+  const yTop = PAD.t, yBot = PAD.t + PRICE_H;
+  const syTop = yBot + GAP, syBot = syTop + SRSI_H;
+
+  if (!rows.length) {
+    g.fillStyle = '#787b86'; g.textAlign = 'center';
+    g.fillText('无该周期数据', cssW / 2, yBot / 2);
+    return;
+  }
+
+  // 关键位 / 目标（1D 视图画日线 swing），并纳入可视范围保证不会被裁掉
+  const levels = [];
+  if (tf === '1D') {
+    (coin.sh1d || []).slice(-2).forEach(x => levels.push([x[1], '#d4a017', [5, 4]]));
+    (coin.sl1d || []).slice(-2).forEach(x => levels.push([x[1], '#378add', [5, 4]]));
+  }
+  if (coin.target) levels.push([coin.target, '#9c6ade', [2, 3]]);
+
+  let lo = Infinity, hi = -Infinity;
+  rows.forEach(r => { if (r[3] < lo) lo = r[3]; if (r[2] > hi) hi = r[2]; });
+  levels.forEach(([p]) => { if (p < lo) lo = p; if (p > hi) hi = p; });
+  const pad = (hi - lo) * 0.06 || Math.abs(hi) * 0.01 || 1;
+  lo -= pad; hi += pad;
+
+  const X = i => x0 + (x1 - x0) * (i + 0.5) / rows.length;
+  const Y = p => yBot - (p - lo) / (hi - lo) * (yBot - yTop);
+  const SY = v => syBot - Math.max(0, Math.min(100, v)) / 100 * (syBot - syTop);
+
+  // 价格网格 + 右轴刻度
+  g.textAlign = 'left'; g.textBaseline = 'middle';
+  for (let k = 0; k <= 4; k++) {
+    const y = yTop + (yBot - yTop) * k / 4;
+    g.strokeStyle = '#1e222d'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x0, y + 0.5); g.lineTo(x1, y + 0.5); g.stroke();
+    g.fillStyle = '#787b86';
+    g.fillText(fmtP(hi - (hi - lo) * k / 4), x1 + 5, y);
+  }
+
+  // 蜡烛
+  const bw = Math.max(1, Math.min(9, (x1 - x0) / rows.length * 0.62));
+  rows.forEach((r, i) => {
+    const up = r[4] >= r[1];
+    g.strokeStyle = g.fillStyle = up ? UP : DOWN;
+    const x = Math.round(X(i)) + 0.5;
+    g.beginPath(); g.moveTo(x, Y(r[2])); g.lineTo(x, Y(r[3])); g.stroke();
+    const yt = Y(Math.max(r[1], r[4])), yb = Y(Math.min(r[1], r[4]));
+    g.fillRect(x - bw / 2, yt, bw, Math.max(1, yb - yt));
+  });
+
+  // 关键位虚线 + 价位标注
+  levels.forEach(([p, color, dash]) => {
+    const y = Y(p);
+    g.save(); g.setLineDash(dash); g.strokeStyle = color; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x0, y + 0.5); g.lineTo(x1, y + 0.5); g.stroke();
+    g.restore();
+    g.fillStyle = color; g.textAlign = 'right'; g.textBaseline = 'bottom';
+    g.fillText(fmtP(p), x1, y - 2);
+  });
+
+  // 时间轴（4 个刻度）
+  g.fillStyle = '#787b86'; g.textAlign = 'center'; g.textBaseline = 'top';
+  for (let k = 0; k <= 3; k++) {
+    const i = Math.min(rows.length - 1, Math.round((rows.length - 1) * k / 3));
+    g.fillText(fmtDate(rows[i][0]), X(i), syBot + 3);
+  }
+
+  // StochRSI 面板
+  g.strokeStyle = '#2a2e39'; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(x0, syTop + 0.5); g.lineTo(x1, syTop + 0.5); g.stroke();
+  g.beginPath(); g.moveTo(x0, syBot + 0.5); g.lineTo(x1, syBot + 0.5); g.stroke();
+  [20, 80].forEach(v => {
+    const y = SY(v);
+    g.save(); g.setLineDash([4, 4]); g.strokeStyle = '#5d606b';
+    g.beginPath(); g.moveTo(x0, y + 0.5); g.lineTo(x1, y + 0.5); g.stroke(); g.restore();
+    g.fillStyle = '#787b86'; g.textAlign = 'right'; g.textBaseline = 'middle';
+    g.fillText(String(v), x0 + 20, y);
+  });
+  if (vals.length) {
+    const off = Math.max(0, rows.length - vals.length);
+    g.strokeStyle = '#2962ff'; g.lineWidth = 1.5;
+    g.beginPath();
+    vals.forEach((v, i) => {
+      const x = X(i + off), y = SY(v);
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.stroke();
+    const last = vals[vals.length - 1];
+    g.fillStyle = '#2962ff'; g.textAlign = 'left'; g.textBaseline = 'middle';
+    g.fillText('SRSI ' + last.toFixed(1), x1 + 5, SY(last));
+  }
+  g.fillStyle = '#787b86'; g.textAlign = 'left'; g.textBaseline = 'top';
+  g.fillText('StochRSI（' + (tf === '1D' ? '1日' : '1小时') + '）', x0 + 2, syTop + 4);
+}
+
+function scheduledDraw(cv) {
+  if (cv._raf) cancelAnimationFrame(cv._raf);
+  cv._raf = requestAnimationFrame(() => { cv._raf = 0; drawChart(cv); drawn.add(cv); });
+}
+function clearCanvas(cv) {
+  if (cv._raf) { cancelAnimationFrame(cv._raf); cv._raf = 0; }
+  drawn.delete(cv);
+  cv.width = 0; cv.height = 0;
+}
+
+function setupObserver() {
+  if (io) return;
+  io = new IntersectionObserver(es => {
+    es.forEach(e => { e.isIntersecting ? scheduledDraw(e.target) : clearCanvas(e.target); });
+  }, { rootMargin: '600px 0px' });
+}
+
+/* ---------------- 渲染卡片 ---------------- */
+function render(c) {
+  const card = document.createElement('div');
+  card.className = 'card' + (c.signal ? ' sig' : '');
+  const dirTag = c.dir === '多' ? '<span class="tag t-long">多</span>'
+    : c.dir === '空' ? '<span class="tag t-short">空</span>'
+      : '<span class="tag t-fix">无方向</span>';
+  const sigTag = c.signal ? '<span class="tag t-sig">满足全部条件</span>' : '';
+  const fixTag = c._fixed ? '<span class="tag t-fix">固定监控</span>' : '';
+  const pushTag = c._pushed ? '<span class="tag t-sig">当日已推送</span>' : '';
+  const g = c.gates || {};
+  const passCnt = GATES.filter(x => g[x.key]).length;
+  const chip = (label, ok) => `<span class="chip ${ok ? 'ok' : 'no'}">${label} ${ok ? '✓' : '✗'}</span>`;
+  card.innerHTML = `
+    <div class="hd">
+      <span class="nm">${c.name}</span><span class="px">${fmtP(c.price)}</span>
+      ${dirTag} ${sigTag} ${pushTag} ${fixTag}
+    </div>
+    <div class="metrics">
+      <span>SRSI 1d <b>${c.s1}</b> / 1h <b>${c.s1h}</b> / 4h <b>${c.s4h === null || c.s4h === undefined ? '—' : c.s4h}</b></span>
+      <span>ADX(1h) <b>${c.adx1h}</b></span>
+      <span>ATR/价 <b>${c.atr_pct}%</b></span>
+      <span>结构 1d <b>${DIRMAP[c.d1d]}</b> · 1h <b>${DIRMAP[c.d1h]}</b> · 4h <b>${DIRMAP[c.d4h]}</b> · 15m <b>${DIRMAP[c.d15m]}</b></span>
+      <span>目标 <b>${c.target ? fmtP(c.target) : '—'}</b> · 空间 <b>${c.space_pct === null ? '—' : c.space_pct + '%'}</b></span>
+      <span>通过 <b>${passCnt}/${GATES.length}</b> 门 · 加权 <b>${c._score}</b></span>
+    </div>
+    <div class="gates">
+      ${GATES.map(x => chip(`${x.label}`, g[x.key])).join('')}
+    </div>
+    <div class="tabs">
+      <button class="tab on" data-tf="1D">1D</button>
+      <button class="tab" data-tf="4H">4H</button>
+      <button class="tab" data-tf="1H">1H</button>
+    </div>
+    <canvas></canvas>`;
+  document.getElementById('app').appendChild(card);
+
+  const cv = card.querySelector('canvas');
+  cv._coin = c; cv._tf = '1D';
+  card.querySelectorAll('.tab').forEach(b => b.onclick = () => {
+    card.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === b));
+    cv._tf = b.dataset.tf;
+    if (cv.width) drawChart(cv);
+  });
+  setupObserver();
+  io.observe(cv);
+}
+
+/* ---------------- 条件筛选 + 排序 ---------------- */
+function gateScore(c) {
+  let s = 0;
+  GATES.forEach(g => { if (c.gates && c.gates[g.key]) s += g.weight; });
+  return s;
+}
+function gatePass(c) {
+  return GATES.filter(g => c.gates && c.gates[g.key]).length;
+}
+/* 排序：① 通过条件数多者靠前（主键）② 同数量时按优先级加权得分 ③ 再看目标空间 ④ 固定监控币 */
+function byPriority(a, b) {
+  return (b._pass - a._pass) ||
+    (b._score - a._score) ||
+    (((b.space_pct === null ? -999 : b.space_pct)) - ((a.space_pct === null ? -999 : a.space_pct))) ||
+    (b._fixed - a._fixed);
+}
+function visibleCoins() {
+  let list = BASE;                                   // 必选门已在 BASE 阶段过滤掉
+  if (ACTIVE.size) list = list.filter(c => [...ACTIVE].every(k => c.gates && c.gates[k]));
+  return list.slice().sort(byPriority);
+}
+function buildFilters() {
+  const el = document.getElementById('filters');
+  el.innerHTML = '';
+  GATES.forEach((g, i) => {
+    const b = document.createElement('button');
+    const req = !!g.required;
+    const on = req || ACTIVE.has(g.key);
+    b.className = 'fbtn' + (on ? ' on' : '') + (req ? ' req' : '');
+    b.dataset.gate = g.key;
+    b.dataset.req = req ? '1' : '0';
+    b.title = `优先级 ${i + 1}（排序权重 ${g.weight}）· ${g.note}｜` +
+      (req ? '必选条件，始终满足' : `点击${on ? '取消' : '加入'}筛选`);
+    b.innerHTML = `<span class="fnum">${i + 1}</span>${g.label}` +
+      (req ? ' <span class="lock">必</span>' : '') +
+      ` <span class="fbadge">${GATE_CNT[g.key] || 0}</span>`;
+    b.onclick = () => req ? flashLock(`${i + 1}${g.label} 是必选条件，不可取消`) : toggleGate(g.key);
+    el.appendChild(b);
+  });
+}
+function flashLock(msg) {
+  const el = document.getElementById('lockmsg');
+  if (!el) return;
+  el.textContent = '✕ ' + msg;
+  clearTimeout(flashLock._t);
+  flashLock._t = setTimeout(() => { el.textContent = ''; }, 1800);
+}
+function syncAllBtn() {
+  const opt = GATES.filter(g => !g.required);
+  document.getElementById('flt').classList.toggle('on', opt.length > 0 && opt.every(g => ACTIVE.has(g.key)));
+}
+function toggleGate(key) {
+  if (ACTIVE.has(key)) ACTIVE.delete(key); else ACTIVE.add(key);
+  syncAllBtn(); buildFilters(); paint();
+}
+/* 「只看满足条件」= 对**可选**条件一键全选/全取消（必选门恒定满足） */
+function toggleAll() {
+  const opt = GATES.filter(g => !g.required);
+  if (opt.every(g => ACTIVE.has(g.key))) opt.forEach(g => ACTIVE.delete(g.key));
+  else opt.forEach(g => ACTIVE.add(g.key));
+  syncAllBtn(); buildFilters(); paint();
+}
+
+function paint() {
+  const app = document.getElementById('app');
+  if (io) { io.disconnect(); io = null; }
+  app.querySelectorAll('canvas').forEach(clearCanvas);
+  drawn.clear();
+  app.innerHTML = '';
+  const list = visibleCoins();
+  document.getElementById('hitv').textContent = list.length;
+  document.getElementById('totv').textContent = BASE.length;
+  if (!list.length) {
+    app.innerHTML = `<div class="msg">当前没有符合条件的币。<br>（必选门后剩 ${BASE.length} 个；可取消 ①-④ 的筛选，或点「只看满足条件」一键全选）</div>`;
+    return;
+  }
+  list.forEach(render);
+}
+
+let rt = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(rt);
+  rt = setTimeout(() => [...drawn].forEach(cv => { if (cv.isConnected && cv.width) drawChart(cv); }), 200);
+});
+
+function load() {
+  const gen = document.getElementById('gen');
+  const app = document.getElementById('app');
+  gen.textContent = '加载中…';
+  app.innerHTML = '<div class="msg">读取 charts_data.json…</div>';
+  fetch('charts_data.json?t=' + Date.now())
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => {
+      DATA = d;
+      const fixed = d.fixed || [];
+      const pushedNames = new Set((d.pushed_today || []).map(k => k.split('|')[0]));
+      COINS = (d.coins || []).map(c => Object.assign({}, c, {
+        _fixed: fixed.indexOf(c.name) >= 0,
+        _pushed: pushedNames.has(c.name)
+      }));
+      // 预计算：通过门数 + 加权得分（排序用）；再按必选门筛出展示池 BASE，
+      // 按钮角标统计的是「BASE 内有多少通过该门」，这样数字才有参考意义。
+      GATES.forEach(g => { GATE_CNT[g.key] = 0; });
+      COINS.forEach(c => { c._pass = gatePass(c); c._score = gateScore(c); });
+      BASE = COINS.filter(c => REQ_KEYS.every(k => c.gates && c.gates[k]));
+      BASE.forEach(c => GATES.forEach(g => { if (c.gates[g.key]) GATE_CNT[g.key]++; }));
+      const sigs = COINS.filter(c => c.signal).length;
+      gen.textContent = `生成于 ${d.generated_at} · 扫描 ${COINS.length} 个币 · 通过必选 ${BASE.length} 个 · 满足全部条件 ${sigs} 个`;
+      buildFilters();
+      syncAllBtn();
+      const p = d.params || {};
+      // ③ 的触发门槛来自 params.SRSI1D；旧数据没有该字段时兜底用反向极值阈值，避免整页渲染中断
+      const s1d = p.SRSI1D || p.SRSI || [20, 80];
+      document.querySelector('.note').innerHTML =
+        `数据由云端每 15 分钟生成一次（快照，非实时）· 涨绿跌红 · 页面不依赖任何外部服务，受限网络也能打开<br>` +
+        `金色虚线 = 日线 swing 高（阻力），蓝色虚线 = 日线 swing 低（支撑），紫色点线 = 目标位<br>` +
+        `<b>统一策略</b>（与推送口径同源）：① 1小时不与日线反向 ② 日线在关键位置 ±${p.LEVEL_PCT}% ` +
+        `③ 日线 SRSI 超买超卖位（多&lt;${s1d[0]} / 空&gt;${s1d[1]}） ④ 4小时 SRSI 不在反向极值<br>` +
+        `<b>固定门</b>：ADX&gt;${p.ADX} · ATR/价 ${p.ATR[0]}-${p.ATR[1]}% · 空间&gt;${p.SPACE_MIN}%`;
+      paint();
+    })
+    .catch(e => {
+      gen.textContent = '数据加载失败';
+      app.innerHTML = `<div class="msg err">charts_data.json 读取失败：${e.message}<br>（等云端 workflow 第一次生成数据后刷新）</div>`;
+    });
+}
+load();
+</script>
+</body>
+</html>
